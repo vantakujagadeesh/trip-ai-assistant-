@@ -1,33 +1,19 @@
-# Python / Virtual Environment
+# Environment & secrets
+.env
+*.env
+backend/.env
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-env/
 venv/
+env/
 ENV/
-.venv/
 
-# Environment Variables & Secrets
-.env
-backend/.env
-
-# Operating System
+# OS / System
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
+*.DS_Store
 
-# IDE & Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Temporary & Log files
-*.log
-scratch/
+# RAG vector database generated files
+backend/rag/chroma_db/
