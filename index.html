@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Roam | Your AI Travel Assistant</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <link rel="stylesheet" href="styles.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+  <script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface": "#f8f9fa",
+            "primary": "#a43c12",
+            "primary-container": "#ff7f50",
+            "primary-fixed": "#ffdbcf",
+            "secondary-container": "#ffbf00",
+            "surface-container-lowest": "#ffffff",
+            "surface-container-low": "#f3f4f5",
+            "surface-container": "#edeeef",
+            "on-surface": "#191c1d",
+            "on-surface-variant": "#57423b",
+            "outline": "#8b7169",
+            "outline-variant": "#dec0b6"
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-surface text-on-surface flex flex-col min-h-screen" style="font-family: 'Inter', sans-serif;">
+
+  <!-- Navigation Bar -->
+  <header class="fixed top-0 left-0 w-full z-50 bg-white/90 border-b border-outline-variant" style="backdrop-filter: blur(12px);">
+    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <a href="index.html" class="flex items-center gap-2 text-2xl font-extrabold text-primary tracking-tight">
+        <span class="material-symbols-outlined text-3xl">explore</span>
+        <span>Roam</span>
+      </a>
+      <nav class="hidden md:flex items-center gap-8 text-sm">
+        <a href="discover.html" class="font-medium text-on-surface-variant hover:text-primary transition-colors">Find a Trip</a>
+        <a href="my-trips.html" class="font-medium text-on-surface-variant hover:text-primary transition-colors">My Trips</a>
+        <a href="plan.html" class="font-medium text-primary border-b-2 border-primary pb-1">AI Planner</a>
+      </nav>
+      <div class="flex items-center gap-4">
+        <a href="my-trips.html" class="px-4 py-2 text-sm font-semibold text-on-surface hover:text-primary transition-colors">My Saved Trips</a>
+        <a href="plan.html" class="px-5 py-2 rounded-xl bg-primary text-white text-sm font-semibold shadow-sm hover:bg-opacity-90 active:scale-95 transition-all">Start Planning</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <main class="flex-1 mt-16 flex flex-col items-center justify-center px-6 py-16">
+    <div class="max-w-4xl w-full text-center space-y-8">
+      
+      <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary-fixed text-primary text-xs font-bold tracking-wide uppercase">
+        <span class="material-symbols-outlined text-sm">auto_awesome</span>
+        Next-Gen Multi-Modal AI Travel Concierge
+      </div>
+
+      <h1 class="text-4xl md:text-6xl font-extrabold text-on-surface tracking-tight leading-tight">
+        Where will your curiosity take you today?
+      </h1>
+
+      <p class="text-lg md:text-xl text-on-surface-variant max-w-2xl mx-auto font-normal">
+        Compare <strong>Flights, Vande Bharat Trains, Volvo Buses, and Outstation Cabs</strong> with live weather, maps, and bespoke itineraries generated in seconds.
+      </p>
+
+      <!-- AI Prompt Box -->
+      <div class="bg-surface-container-lowest border border-outline-variant p-3 rounded-2xl shadow-lg max-w-3xl mx-auto flex flex-col sm:flex-row gap-3">
+        <div class="flex-1 flex items-center px-4 gap-3 bg-surface-container-low rounded-xl">
+          <span class="material-symbols-outlined text-primary">chat_spark</span>
+          <input type="text" id="hero-prompt-input" placeholder="Try: 'Plan a 5-day trip to Goa under ₹30,000'..." class="w-full bg-transparent border-none py-3 text-sm focus:ring-0 focus:outline-none text-on-surface placeholder:text-on-surface-variant/70"/>
+        </div>
+        <button onclick="startTripWithPrompt()" class="bg-primary text-white font-semibold px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-opacity-90 transition-all shadow-md active:scale-95">
+          <span>Generate Trip</span>
+          <span class="material-symbols-outlined text-sm">arrow_forward</span>
+        </button>
+      </div>
+
+      <!-- Preset Quick Ideas -->
+      <div class="flex flex-wrap justify-center items-center gap-3 pt-4 text-xs font-medium">
+        <span class="text-on-surface-variant">Popular Prompts:</span>
+        <button onclick="setAndStart('Plan a 5-day trip to Goa under ₹30,000')" class="px-3.5 py-1.5 rounded-full border border-outline-variant bg-white hover:border-primary hover:text-primary transition-all">
+          🏖️ 5 days Goa under ₹30k
+        </button>
+        <button onclick="setAndStart('Plan a 4-day Jaipur trip from Delhi by train or cab')" class="px-3.5 py-1.5 rounded-full border border-outline-variant bg-white hover:border-primary hover:text-primary transition-all">
+          🏰 Jaipur by train / cab
+        </button>
+        <button onclick="setAndStart('7 days in Kerala backwaters under ₹40,000')" class="px-3.5 py-1.5 rounded-full border border-outline-variant bg-white hover:border-primary hover:text-primary transition-all">
+          🌴 7 days Kerala escape
+        </button>
+      </div>
+
+    </div>
+
+    <!-- Featured Destination Preview Grid -->
+    <div class="max-w-6xl w-full mt-20">
+      <div class="flex justify-between items-end mb-8">
+        <div>
+          <h2 class="text-2xl font-bold text-on-surface">Trending Destinations</h2>
+          <p class="text-sm text-on-surface-variant">Real-time multi-modal itineraries powered by AI</p>
+        </div>
+        <a href="discover.html" class="text-sm font-semibold text-primary hover:underline flex items-center gap-1">
+          <span>Explore All</span>
+          <span class="material-symbols-outlined text-sm">east</span>
+        </a>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        <!-- Destination 1 -->
+        <div class="trip-card bg-surface-container-lowest border border-outline-variant rounded-2xl overflow-hidden cursor-pointer hover:border-primary transition-all shadow-sm" onclick="setAndStart('Plan a 5-day trip to Goa under ₹30,000')">
+          <div class="h-52 bg-cover bg-center" style="background-image: url('https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=800&auto=format&fit=crop&q=80')"></div>
+          <div class="p-5">
+            <div class="flex justify-between items-start mb-2">
+              <h3 class="font-bold text-lg text-on-surface">Goa Beach & Heritage</h3>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary-fixed text-primary">5 Days</span>
+            </div>
+            <p class="text-xs text-on-surface-variant mb-4">Baga Beach • Fort Aguada • Dudhsagar Falls</p>
+            <div class="flex justify-between items-center pt-3 border-t border-outline-variant text-xs">
+              <span class="text-primary font-bold">Flights, Vande Bharat & Buses</span>
+              <span class="text-primary font-semibold flex items-center gap-1">Plan Now <span class="material-symbols-outlined text-xs">arrow_forward</span></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Destination 2 -->
+        <div class="trip-card bg-surface-container-lowest border border-outline-variant rounded-2xl overflow-hidden cursor-pointer hover:border-primary transition-all shadow-sm" onclick="setAndStart('Plan a 4-day trip to Jaipur from Delhi by train or cab')">
+          <div class="h-52 bg-cover bg-center" style="background-image: url('https://images.unsplash.com/photo-1477587458883-47145ed94245?w=800&auto=format&fit=crop&q=80')"></div>
+          <div class="p-5">
+            <div class="flex justify-between items-start mb-2">
+              <h3 class="font-bold text-lg text-on-surface">Jaipur Pink City</h3>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary-fixed text-primary">4 Days</span>
+            </div>
+            <p class="text-xs text-on-surface-variant mb-4">Amber Fort • City Palace • Hawa Mahal</p>
+            <div class="flex justify-between items-center pt-3 border-t border-outline-variant text-xs">
+              <span class="text-primary font-bold">Vande Bharat & Express</span>
+              <span class="text-primary font-semibold flex items-center gap-1">Plan Now <span class="material-symbols-outlined text-xs">arrow_forward</span></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Destination 3 -->
+        <div class="trip-card bg-surface-container-lowest border border-outline-variant rounded-2xl overflow-hidden cursor-pointer hover:border-primary transition-all shadow-sm" onclick="setAndStart('Plan a 7-day trip to Kerala backwaters')">
+          <div class="h-52 bg-cover bg-center" style="background-image: url('https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=800&auto=format&fit=crop&q=80')"></div>
+          <div class="p-5">
+            <div class="flex justify-between items-start mb-2">
+              <h3 class="font-bold text-lg text-on-surface">Kerala Backwaters</h3>
+              <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary-fixed text-primary">7 Days</span>
+            </div>
+            <p class="text-xs text-on-surface-variant mb-4">Alleppey Houseboat • Munnar Tea • Kovalam</p>
+            <div class="flex justify-between items-center pt-3 border-t border-outline-variant text-xs">
+              <span class="text-primary font-bold">Houseboats & Coastal Transit</span>
+              <span class="text-primary font-semibold flex items-center gap-1">Plan Now <span class="material-symbols-outlined text-xs">arrow_forward</span></span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-outline-variant bg-surface-container-low py-8 mt-16">
+    <div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-on-surface-variant">
+      <div class="flex items-center gap-2">
+        <span class="font-bold text-sm text-primary">Roam</span>
+        <span>© 2026 Roam AI Travel Assistant. Powered by RAG + Multi-Modal MCP.</span>
+      </div>
+      <div class="flex gap-6">
+        <a href="discover.html" class="hover:underline">Discover</a>
+        <a href="my-trips.html" class="hover:underline">My Trips</a>
+        <a href="plan.html" class="hover:underline">AI Planner</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    function setPrompt(text) {
+      document.getElementById('hero-prompt-input').value = text;
+    }
+    function setAndStart(text) {
+      localStorage.setItem('roam_active_prompt', text);
+      location.href = 'plan.html';
+    }
+    function startTripWithPrompt() {
+      const val = document.getElementById('hero-prompt-input').value;
+      if (val) {
+        localStorage.setItem('roam_active_prompt', val);
+      }
+      location.href = 'plan.html';
+    }
+  </script>
+</body>
+</html>

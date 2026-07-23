@@ -1,0 +1,67 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+
+:root {
+  --primary: #a43c12;
+  --primary-container: #ff7f50;
+  --primary-fixed: #ffdbcf;
+  --on-primary: #ffffff;
+  --on-primary-container: #6c2000;
+  --secondary: #795900;
+  --secondary-container: #ffbf00;
+  --on-secondary-container: #6d5000;
+  --surface: #f8f9fa;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #f3f4f5;
+  --surface-container: #edeeef;
+  --surface-container-high: #e7e8e9;
+  --on-surface: #191c1d;
+  --on-surface-variant: #57423b;
+  --outline: #8b7169;
+  --outline-variant: #dec0b6;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--surface);
+  color: var(--on-surface);
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  vertical-align: middle;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #dec0b6;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a43c12;
+}
+
+.trip-card {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.trip-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 30px -8px rgba(164, 60, 18, 0.12);
+}
+
+.glass-nav {
+  background-color: rgba(248, 249, 250, 0.9);
+  backdrop-filter: blur(12px);
+}
