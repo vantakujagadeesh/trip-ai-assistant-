@@ -166,8 +166,4 @@ trip-ai-assistant/
         └── knowledge_base.py # ChromaDB vector store retriever
 ```
 
----
 
-## 📄 License
-
-Distributed under the MIT License. See `LICENSE` for details.
