@@ -83,8 +83,8 @@
 ## 🛠️ Tech Stack
 
 - **Frontend:** HTML5, CSS3 (Vanilla CSS + TailwindCSS), JavaScript (ES6+), Leaflet.js Maps, Web Speech API, Web SpeechSynthesis API.
-- **Backend:** FastAPI (Python 3.9+), Uvicorn, LangGraph State Machine, ChromaDB (Vector Store), Pydantic.
-- **AI Models & SDK:** Google Gemini API (`google-genai` SDK — `gemini-1.5-flash`), Custom NLP Intent Parser.
+- **Backend:** FastAPI (Python 3.12+), Uvicorn, LangGraph, keyword-based destination knowledge retrieval.
+- **AI Models & SDK:** Google Gemini API (`google-genai` SDK — `gemini-1.5-flash`), custom NLP intent parser.
 - **APIs & Data:** Open-Meteo Weather API, Open-Meteo Air Quality API, Amadeus Flight API, OpenTripMap API.
 
 ---
@@ -92,7 +92,7 @@
 ## 🚀 Quick Start Guide
 
 ### Prerequisites
-- Python 3.9 or higher
+- Python 3.12
 - Git
 
 ### 1. Clone the Repository
@@ -103,29 +103,27 @@ cd trip-ai-assistant-
 
 ### 2. Set Up Virtual Environment & Dependencies
 ```bash
-cd backend
-python3 -m venv venv
-source venv/bin/activate
+python3.12 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
 ### 3. Environment Configuration
-Create a `.env` file inside the `backend/` directory:
-```env
-GEMINI_API_KEY=your_gemini_api_key_here
+Copy `.env.example` to `.env` and add the API keys you want to use:
+```bash
+cp .env.example .env
 ```
 
 ### 4. Launch the Servers
 
 **Terminal 1: Start Backend API (FastAPI)**
 ```bash
-cd backend
-python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+./start.sh
 ```
 
 **Terminal 2: Start Frontend HTTP Server**
 ```bash
-python3 -m http.server 3000
+python3 -m http.server 3000 --directory public
 ```
 
 ### 5. Access the Platform
@@ -134,36 +132,45 @@ Open your browser and navigate to:
 - **Home Landing Page:** `http://localhost:3000/index.html`
 - **API Documentation:** `http://localhost:8000/docs`
 
+## Deploy to Vercel
+
+The repository is configured as a FastAPI application with static files served from `public/`. Import the Git repository into Vercel and keep the project root as the Root Directory; Vercel detects the `backend.main:app` entry point from `pyproject.toml`.
+
+Add the integrations you use under **Project Settings → Environment Variables**:
+
+- `GEMINI_API_KEY`
+- `AMADEUS_API_KEY` and `AMADEUS_API_SECRET`
+- `OPENTRIPMAP_API_KEY`
+- `EXCHANGE_RATE_API_KEY`
+- `N8N_EMAIL_WEBHOOK_URL` and `N8N_PRICE_ALERT_WEBHOOK_URL`
+
+Redeploy after adding environment variables. No local Chroma database is required; the serverless deployment uses the built-in keyword retrieval fallback.
+
 ---
 
 ## 📂 Project Structure
 
 ```
 trip-ai-assistant/
-├── index.html              # Landing page
-├── plan.html               # Main AI Travel Studio & Chat interface
-├── discover.html           # Destination discovery page
-├── my-trips.html           # Saved trips dashboard
-├── trip-details.html       # Saved trip details view
-├── styles.css              # Custom global styles
-├── start.sh                # Server launcher script
-├── README.md               # Project documentation
+├── public/                 # Static frontend served by Vercel's CDN
+│   ├── index.html
+│   ├── plan.html
+│   ├── discover.html
+│   ├── my-trips.html
+│   ├── trip-details.html
+│   └── styles.css
+├── pyproject.toml           # Python version and Vercel ASGI entry point
+├── requirements.txt         # Runtime and local development dependencies
+├── .env.example             # Local environment variable template
+├── start.sh                 # Local API launcher
 └── backend/
-    ├── main.py             # FastAPI server & SSE endpoint
+    ├── main.py              # FastAPI server & SSE endpoint
     ├── graph/
-    │   └── agent.py        # LangGraph State Machine & Gemini LLM agent
-    ├── mcp_tools/          # MCP Tools Suite
-    │   ├── flights.py      # Flight search tool
-    │   ├── trains.py       # Indian Railways (Vande Bharat/Express) tool
-    │   ├── buses.py        # Volvo Intercity bus tool
-    │   ├── cabs.py         # Outstation cabs & self-drive rentals tool
-    │   ├── hotels.py       # Hotel offers search tool
-    │   ├── weather.py      # Open-Meteo weather tool
-    │   ├── live_conditions.py # Live weather, UV, AQI & road conditions tool
-    │   ├── places.py       # OpenTripMap & 3-Meal Dining Engine
-    │   └── itinerary.py    # Master itinerary orchestrator
+    │   └── agent.py
+    ├── mcp_tools/
+    ├── n8n/
     └── rag/
-        └── knowledge_base.py # ChromaDB vector store retriever
+        └── knowledge_base.py
 ```
 
 

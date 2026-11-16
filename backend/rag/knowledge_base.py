@@ -1,14 +1,11 @@
-"""
-RAG Knowledge Base — ChromaDB setup and document loading
-Destination guides embedded with sentence-transformers
-"""
+"""Destination knowledge retrieval with an optional ChromaDB backend."""
 import os
 import json
 from pathlib import Path
 from typing import Optional
 
 
-CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./rag/chroma_db")
+CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR")
 
 # Destination knowledge documents
 KNOWLEDGE_DOCS = [
@@ -341,9 +338,12 @@ VISA TIPS:
 
 def get_knowledge_retriever():
     """
-    Initialize ChromaDB collection and return a retriever.
-    This runs on backend startup and persists to disk.
+    Initialize ChromaDB only when a persistent directory is configured.
+    Otherwise, use the built-in keyword retriever.
     """
+    if not CHROMA_PERSIST_DIR:
+        return _keyword_retriever
+
     try:
         import chromadb
         from chromadb.utils import embedding_functions
