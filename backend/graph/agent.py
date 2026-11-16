@@ -79,7 +79,7 @@ def _call_gemini(prompt: str) -> str:
 
 # ── Node 1: RAG Retrieval ──────────────────────────────────────────────────────
 async def rag_retrieval_node(state: TravelAgentState) -> dict:
-    """Retrieve relevant destination knowledge from ChromaDB / keyword fallback."""
+    """Retrieve destination knowledge from ChromaDB or the keyword fallback."""
     try:
         context = _retriever(state["user_message"], n_results=3)
         return {

@@ -2,12 +2,14 @@
 .env
 *.env
 backend/.env
+.vercel/
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 venv/
+.venv/
 env/
 ENV/
 
@@ -17,3 +19,4 @@ ENV/
 
 # RAG vector database generated files
 backend/rag/chroma_db/
+.vercel
