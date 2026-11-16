@@ -105,7 +105,7 @@ cd trip-ai-assistant-
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[dev]"
 ```
 
 ### 3. Environment Configuration
@@ -160,7 +160,6 @@ trip-ai-assistant/
 │   ├── trip-details.html
 │   └── styles.css
 ├── pyproject.toml           # Python version and Vercel ASGI entry point
-├── requirements.txt         # Runtime and local development dependencies
 ├── .env.example             # Local environment variable template
 ├── start.sh                 # Local API launcher
 └── backend/
