@@ -134,7 +134,7 @@ Open your browser and navigate to:
 
 ## Deploy to Vercel
 
-The repository is configured as a FastAPI application with static files served from `public/`. Import the Git repository into Vercel and keep the project root as the Root Directory; Vercel detects the `backend.main:app` entry point from `pyproject.toml`.
+The repository is configured as a FastAPI application with static files served from `public/`. Import the Git repository into Vercel and keep the project root as the Root Directory; Vercel detects the `backend.main:app` entry point from `pyproject.toml`. `backend/requirements.txt` lists the minimal runtime packages for the Vercel function and should stay aligned with the root `pyproject.toml`.
 
 Add the integrations you use under **Project Settings → Environment Variables**:
 
@@ -164,6 +164,7 @@ trip-ai-assistant/
 ├── start.sh                 # Local API launcher
 └── backend/
     ├── main.py              # FastAPI server & SSE endpoint
+    ├── requirements.txt     # Minimal runtime dependencies for Vercel
     ├── graph/
     │   └── agent.py
     ├── mcp_tools/
