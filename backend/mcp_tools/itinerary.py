@@ -1,8 +1,10 @@
 """Build an itinerary outline from configured travel-data providers."""
 import asyncio
+from copy import deepcopy
 from datetime import datetime, timedelta
 from math import asin, cos, isfinite, radians, sin, sqrt
 from typing import Optional, List, Dict, Any
+from uuid import uuid4
 
 from mcp_tools.flights import search_flights
 from mcp_tools.hotels import search_hotels
@@ -39,6 +41,7 @@ async def build_itinerary(
     start_date: Optional[str] = None,
     preferences: Optional[list] = None,
     guests: int = 2,
+    traveler_preferences: Optional[dict] = None,
 ) -> dict:
     """
     Orchestrate live weather/catalog lookups and clearly marked provider availability.
@@ -51,6 +54,22 @@ async def build_itinerary(
         raise ValueError("Trip duration must be at least one day.")
     end_date = (datetime.strptime(start_date, "%Y-%m-%d") + timedelta(days=days - 1)).strftime("%Y-%m-%d")
     prefs = preferences or ["attractions", "restaurants"]
+    traveler_preferences = traveler_preferences or {}
+    interest_categories = {
+        "culture": "cultural",
+        "history": "historic",
+        "nature": "natural",
+        "beaches": "beaches",
+        "adventure": "natural",
+        "food": "restaurants",
+    }
+    selected_categories = [
+        interest_categories[interest]
+        for interest in traveler_preferences.get("interests", [])
+        if interest in interest_categories
+    ]
+    if selected_categories:
+        prefs = [selected_categories[0], "restaurants"]
 
     dest_key = destination.lower().strip()
     origin = origin.strip() if origin else ""
@@ -149,8 +168,34 @@ async def build_itinerary(
         meals=meals_data if isinstance(meals_data, dict) else {},
         weather=combined_forecast,
         destination=destination,
-        cab_rental=cab_data.get("self_drive_rentals", [{}])[2] if (isinstance(cab_data, dict) and cab_data.get("self_drive_rentals")) else {}
+        cab_rental=cab_data.get("self_drive_rentals", [{}])[2] if (isinstance(cab_data, dict) and cab_data.get("self_drive_rentals")) else {},
+        traveler_preferences=traveler_preferences,
     )
+    place_status = _provider_status(places_data)
+    for day in day_plan:
+        for index, activity in enumerate(day["activities"], start=1):
+            activity["id"] = f"day-{day['day']}-{index}-{uuid4().hex[:8]}"
+            activity["place"] = activity.get("title") if activity.get("type") == "attraction" else None
+            activity["cost_inr"] = None
+            activity["notes"] = activity.get("description", "")
+            activity["locked"] = False
+            if activity.get("type") == "attraction":
+                activity["source_label"] = "Live" if place_status["status"] == "live_catalog" else "Curated"
+                activity["last_updated"] = place_status.get("checked_at")
+                if day.get("is_rainy"):
+                    activity["plan_b"] = (
+                        "Rain is forecast. Prefer a verified indoor alternative if one is available; "
+                        "otherwise check conditions before leaving."
+                    )
+            elif activity.get("source") == "curated":
+                activity["source_label"] = "Curated"
+                activity["last_updated"] = None
+            elif activity.get("type") == "food":
+                activity["source_label"] = "Unavailable"
+                activity["last_updated"] = None
+            else:
+                activity["source_label"] = "Estimate"
+                activity["last_updated"] = None
 
     return {
         "destination": destination,
@@ -159,6 +204,7 @@ async def build_itinerary(
         "guests": guests,
         "dates": {"start": start_date, "end": end_date, "assumed": date_was_assumed},
         "budget_inr": budget_inr,
+        "traveler_preferences": traveler_preferences,
         "budget_breakdown": budget_breakdown,
         "provider_status": {
             "flights": _provider_status(flight_data),
@@ -387,10 +433,27 @@ def _build_transport_and_route_advice(origin, destination, flight_data, train_da
     return options, recommendation
 
 
-def _build_weather_adaptive_day_plan(days, start_date, places, meals, weather, destination, cab_rental) -> list:
+def _build_weather_adaptive_day_plan(
+    days,
+    start_date,
+    places,
+    meals,
+    weather,
+    destination,
+    cab_rental,
+    traveler_preferences=None,
+) -> list:
     """Build a day outline using only available place, meal, and forecast data."""
     plan = []
     place_idx = 0
+    traveler_preferences = traveler_preferences or {}
+    pace = traveler_preferences.get("pace", "balanced")
+    activity_times = {
+        "relaxed": ["11:00 AM"],
+        "balanced": ["10:00 AM", "4:00 PM"],
+        "packed": ["9:00 AM", "11:30 AM", "4:00 PM"],
+    }
+    middle_day_times = activity_times.get(pace, activity_times["balanced"])
 
     bf_list = meals.get("breakfast", [])
     lunch_list = meals.get("lunch", [])
@@ -407,6 +470,12 @@ def _build_weather_adaptive_day_plan(days, start_date, places, meals, weather, d
             else any(w in condition for w in ["rain", "shower", "thunderstorm", "drizzle"])
             if has_forecast else None
         )
+        day_places = places
+        if is_rainy:
+            indoor_places = [place for place in places if _is_likely_indoor_place(place)]
+            if indoor_places:
+                indoor_ids = {id(place) for place in indoor_places}
+                day_places = indoor_places + [place for place in places if id(place) not in indoor_ids]
 
         bf = bf_list[(day_num - 1) % len(bf_list)] if bf_list else None
         lh = lunch_list[(day_num - 1) % len(lunch_list)] if lunch_list else None
@@ -423,11 +492,11 @@ def _build_weather_adaptive_day_plan(days, start_date, places, meals, weather, d
                 "description": "Allow time to arrive and get oriented. Accommodation and local transport are not booked by this plan."
             })
             _append_meal_or_break(activities, "lunch", "1:30 PM", lh)
-            _append_place_or_free_time(activities, places, place_idx, "3:30 PM")
+            _append_place_or_free_time(activities, day_places, place_idx, "3:30 PM")
             place_idx += bool(places)
 
         elif day_num == days:
-            _append_place_or_free_time(activities, places, place_idx, "10:00 AM")
+            _append_place_or_free_time(activities, day_places, place_idx, "10:00 AM")
             place_idx += bool(places)
             _append_meal_or_break(activities, "lunch", "1:00 PM", lh)
             activities.append({
@@ -437,11 +506,10 @@ def _build_weather_adaptive_day_plan(days, start_date, places, meals, weather, d
             })
 
         else:
-            _append_place_or_free_time(activities, places, place_idx, "10:00 AM")
-            place_idx += bool(places)
             _append_meal_or_break(activities, "lunch", "1:30 PM", lh)
-            _append_place_or_free_time(activities, places, place_idx, "4:00 PM")
-            place_idx += bool(places)
+            for time in middle_day_times:
+                _append_place_or_free_time(activities, day_places, place_idx, time)
+                place_idx += bool(places)
 
         _append_meal_or_break(activities, "dinner", "8:00 PM", dn)
 
@@ -459,9 +527,155 @@ def _build_weather_adaptive_day_plan(days, start_date, places, meals, weather, d
             "is_rainy": is_rainy,
             "activities": activities,
             "travel_tip": tip_txt,
+            "traveler_notes": _traveler_notes(traveler_preferences),
         })
 
     return plan
+
+
+def _is_likely_indoor_place(place: dict) -> bool:
+    searchable = " ".join(
+        str(place.get(field, ""))
+        for field in ("name", "category", "description")
+    ).lower()
+    return any(
+        term in searchable
+        for term in ("museum", "gallery", "aquarium", "planetarium", "indoor", "science centre", "science center")
+    )
+
+
+def _traveler_notes(preferences: dict) -> list[str]:
+    notes = []
+    if preferences.get("traveling_with_kids"):
+        notes.append("Traveling with children: check age rules, opening hours, and restroom access.")
+    if preferences.get("traveling_with_seniors"):
+        notes.append("Traveling with seniors: confirm accessibility, walking distance, and rest opportunities.")
+    food_preferences = preferences.get("food_preferences", [])
+    if food_preferences:
+        notes.append(
+            "Food preferences to confirm directly with venues: "
+            + ", ".join(str(item).replace("_", " ") for item in food_preferences)
+            + "."
+        )
+    return notes
+
+
+def regenerate_itinerary_day(
+    itinerary: dict,
+    day_number: int,
+    traveler_preferences: Optional[dict] = None,
+    instruction: str = "",
+) -> dict:
+    """Regenerate one day from the itinerary's existing provider-backed place data."""
+    updated = deepcopy(itinerary)
+    day_plan = updated.get("day_plan")
+    if not isinstance(day_plan, list):
+        raise ValueError("This itinerary does not contain editable day plans.")
+    day = next((item for item in day_plan if item.get("day") == day_number), None)
+    if day is None:
+        raise ValueError("The requested day is not in this itinerary.")
+
+    preferences = dict(traveler_preferences or updated.get("traveler_preferences") or {})
+    instruction_lower = instruction.lower()
+    if any(term in instruction_lower for term in ("relaxed", "slower", "less packed", "easier")):
+        preferences["pace"] = "relaxed"
+    elif any(term in instruction_lower for term in ("packed", "busier", "more stops")):
+        preferences["pace"] = "packed"
+    pace = preferences.get("pace", "balanced")
+    target_count = {"relaxed": 1, "balanced": 2, "packed": 3}.get(pace, 2)
+
+    activities = day.get("activities", [])
+    fixed_activities = [
+        activity for activity in activities
+        if activity.get("locked") or activity.get("type") in {"food", "travel"}
+    ]
+    locked_attractions = [
+        activity for activity in fixed_activities
+        if activity.get("type") == "attraction"
+    ]
+    replacement_count = max(0, target_count - len(locked_attractions))
+
+    places = updated.get("top_places", [])
+    used_elsewhere = {
+        str(activity.get("title", "")).casefold()
+        for other_day in day_plan
+        if other_day is not day
+        for activity in other_day.get("activities", [])
+    }
+    candidates = [
+        place for place in places
+        if str(place.get("name", "")).casefold() not in used_elsewhere
+    ]
+    if day.get("is_rainy") is True:
+        indoor_candidates = [place for place in candidates if _is_likely_indoor_place(place)]
+        if indoor_candidates:
+            candidates = indoor_candidates
+
+    times = {
+        "relaxed": ["11:00 AM"],
+        "balanced": ["10:00 AM", "4:00 PM"],
+        "packed": ["9:00 AM", "11:30 AM", "4:00 PM"],
+    }.get(pace, ["10:00 AM", "4:00 PM"])
+    replacements = []
+    for index, place in enumerate(candidates[:replacement_count]):
+        description = place.get("description") or "Place listing; confirm details before visiting."
+        replacements.append({
+            "id": f"day-{day_number}-regen-{uuid4().hex[:8]}",
+            "time": times[index],
+            "type": "attraction",
+            "title": place.get("name", "Suggested place"),
+            "place": place.get("name"),
+            "description": description,
+            "notes": description,
+            "cost_inr": None,
+            "source": place.get("source", "unknown"),
+            "source_label": (
+                "Live"
+                if updated.get("provider_status", {}).get("places", {}).get("status") == "live_catalog"
+                else "Curated"
+            ),
+            "last_updated": updated.get("provider_status", {}).get("places", {}).get("checked_at"),
+            "locked": False,
+        })
+
+    if replacement_count and not replacements and not locked_attractions:
+        replacements.append({
+            "id": f"day-{day_number}-regen-{uuid4().hex[:8]}",
+            "time": times[0],
+            "type": "free_time",
+            "title": "Flexible time",
+            "place": None,
+            "description": "No unused verified place listings are available for this day.",
+            "notes": "Choose a venue after checking current local information.",
+            "cost_inr": None,
+            "source": "estimate",
+            "source_label": "Estimate",
+            "last_updated": None,
+            "locked": False,
+        })
+
+    day["activities"] = sorted(
+        fixed_activities + replacements,
+        key=lambda activity: _time_sort_key(activity.get("time", "")),
+    )
+    day["traveler_notes"] = _traveler_notes(preferences)
+    day["pace"] = pace
+    if day.get("is_rainy") is True and not any(
+        _is_likely_indoor_place(place) for place in candidates
+    ):
+        day["travel_tip"] = (
+            "Rain is forecast. No verified indoor alternative is available in the current listings; "
+            "check local conditions and consider moving outdoor activities."
+        )
+    updated["traveler_preferences"] = preferences
+    return updated
+
+
+def _time_sort_key(value: str) -> datetime:
+    try:
+        return datetime.strptime(value, "%I:%M %p")
+    except ValueError:
+        return datetime.max
 
 
 def _append_place_or_free_time(activities, places, place_idx, time):

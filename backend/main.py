@@ -24,6 +24,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 from graph.agent import run_agent
+from mcp_tools.itinerary import regenerate_itinerary_day
 from n8n.webhooks import trigger_email_itinerary, trigger_price_alert
 from persistence import get_access_token, get_authenticated_user, public_supabase_config, supabase_rest
 
@@ -69,10 +70,42 @@ app.add_middleware(
 
 
 # ── Pydantic Models ───────────────────────────────────────────────────────────
+class TravelerPreferences(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pace: Literal["relaxed", "balanced", "packed"] = "balanced"
+    interests: list[Literal["culture", "history", "nature", "beaches", "adventure", "food"]] = Field(
+        default_factory=list,
+        max_length=6,
+    )
+    food_preferences: list[
+        Literal["vegetarian", "vegan", "halal", "gluten_free", "dairy_free"]
+    ] = Field(default_factory=list, max_length=5)
+    traveling_with_kids: bool = False
+    traveling_with_seniors: bool = False
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
     ai_data_consent: bool = False
+    traveler_preferences: TravelerPreferences = Field(default_factory=TravelerPreferences)
+
+
+class RegenerateDayRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    itinerary: dict[str, Any]
+    day: int = Field(ge=1, le=90)
+    traveler_preferences: TravelerPreferences = Field(default_factory=TravelerPreferences)
+    instruction: str = Field(default="", max_length=400)
+
+    @field_validator("itinerary")
+    @classmethod
+    def limit_regeneration_payload(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if len(json.dumps(value, ensure_ascii=False).encode("utf-8")) > 100_000:
+            raise ValueError("The itinerary is too large to update.")
+        return value
 
 
 class TripCreate(BaseModel):
@@ -96,6 +129,22 @@ class TripCreate(BaseModel):
     @field_validator("itinerary")
     @classmethod
     def limit_itinerary_size(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if len(json.dumps(value, ensure_ascii=False).encode("utf-8")) > 100_000:
+            raise ValueError("The itinerary is too large to save.")
+        return value
+
+
+class TripUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    days: int = Field(ge=1, le=90)
+    dates: dict[str, Any] = Field(default_factory=dict)
+    estimated_cost_inr: float | None = Field(default=None, ge=0, le=1_000_000_000)
+    itinerary: dict[str, Any]
+
+    @field_validator("itinerary")
+    @classmethod
+    def limit_updated_itinerary_size(cls, value: dict[str, Any]) -> dict[str, Any]:
         if len(json.dumps(value, ensure_ascii=False).encode("utf-8")) > 100_000:
             raise ValueError("The itinerary is too large to save.")
         return value
@@ -191,6 +240,30 @@ async def save_trip(
     return saved[0]
 
 
+@app.patch("/trips/{trip_id}")
+async def update_trip(
+    trip_id: UUID,
+    request: TripUpdate,
+    user: dict[str, Any] = Depends(get_authenticated_user),
+    token: str = Depends(get_access_token),
+):
+    updated = await supabase_rest(
+        "PATCH",
+        "trips",
+        token,
+        params={
+            "id": f"eq.{trip_id}",
+            "user_id": f"eq.{user['id']}",
+            "select": "id,title,destination,days,dates,estimated_cost_inr,itinerary,created_at",
+        },
+        payload=request.model_dump(),
+        prefer="return=representation",
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Trip not found.")
+    return updated[0]
+
+
 @app.post("/chat")
 async def chat(request: ChatRequest):
     """
@@ -209,6 +282,7 @@ async def chat(request: ChatRequest):
             result = await run_agent(
                 request.message,
                 ai_data_consent=request.ai_data_consent,
+                traveler_preferences=request.traveler_preferences.model_dump(),
             )
 
             # Stream tool activity updates
@@ -236,6 +310,20 @@ async def chat(request: ChatRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.post("/itinerary/regenerate-day")
+async def regenerate_day(request: RegenerateDayRequest):
+    try:
+        itinerary = regenerate_itinerary_day(
+            request.itinerary,
+            request.day,
+            traveler_preferences=request.traveler_preferences.model_dump(),
+            instruction=request.instruction,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {"itinerary": itinerary, "day": request.day}
 
 
 @app.get("/trips")

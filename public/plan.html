@@ -161,6 +161,47 @@
 
       <!-- Input Bar -->
       <div class="p-4 bg-white border-t border-outline-variant">
+        <details class="max-w-3xl mx-auto mb-2 text-xs">
+          <summary class="cursor-pointer font-semibold text-on-surface-variant">Traveler preferences</summary>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2 rounded-xl border border-outline-variant bg-surface-container-low p-3">
+            <label class="flex flex-col gap-1">
+              <span class="font-semibold text-on-surface">Trip pace</span>
+              <select id="traveler-pace" class="rounded-lg border border-outline-variant bg-white px-2 py-2">
+                <option value="balanced">Balanced</option>
+                <option value="relaxed">Relaxed</option>
+                <option value="packed">Packed</option>
+              </select>
+            </label>
+            <fieldset class="space-y-1">
+              <legend class="font-semibold text-on-surface">Interests</legend>
+              <div class="flex flex-wrap gap-x-3 gap-y-1">
+                <label><input type="checkbox" data-traveler-interest value="culture"> Culture</label>
+                <label><input type="checkbox" data-traveler-interest value="history"> History</label>
+                <label><input type="checkbox" data-traveler-interest value="nature"> Nature</label>
+                <label><input type="checkbox" data-traveler-interest value="beaches"> Beaches</label>
+                <label><input type="checkbox" data-traveler-interest value="adventure"> Adventure</label>
+                <label><input type="checkbox" data-traveler-interest value="food"> Food</label>
+              </div>
+            </fieldset>
+            <fieldset class="space-y-1">
+              <legend class="font-semibold text-on-surface">Food preferences</legend>
+              <div class="flex flex-wrap gap-x-3 gap-y-1">
+                <label><input type="checkbox" data-food-preference value="vegetarian"> Vegetarian</label>
+                <label><input type="checkbox" data-food-preference value="vegan"> Vegan</label>
+                <label><input type="checkbox" data-food-preference value="halal"> Halal</label>
+                <label><input type="checkbox" data-food-preference value="gluten_free"> Gluten-free</label>
+                <label><input type="checkbox" data-food-preference value="dairy_free"> Dairy-free</label>
+              </div>
+            </fieldset>
+            <fieldset class="space-y-1">
+              <legend class="font-semibold text-on-surface">Traveling with</legend>
+              <div class="flex flex-wrap gap-x-3 gap-y-1">
+                <label><input type="checkbox" id="traveling-with-kids"> Children</label>
+                <label><input type="checkbox" id="traveling-with-seniors"> Seniors</label>
+              </div>
+            </fieldset>
+          </div>
+        </details>
         <label for="ai-data-consent" class="max-w-3xl mx-auto mb-2 flex items-start gap-2 text-[10px] leading-relaxed text-on-surface-variant">
           <input id="ai-data-consent" type="checkbox" class="mt-0.5 flex-shrink-0">
           <span>
@@ -309,8 +350,10 @@
       : '';
     let currentItinerary = null;
     let currentSavedTripId = null;
+    let itineraryDirty = false;
     let isLoading = false;
     let leafMap = null;
+    let itineraryEditorEventsBound = false;
 
     const MAP_COORDS = {
       "goa": [15.2993, 74.1240], "delhi": [28.6139, 77.2090], "mumbai": [19.0760, 72.8777],
@@ -347,15 +390,19 @@
 
         if (pendingTrip) {
           const itinerary = JSON.parse(pendingTrip);
+          applyTravelerPreferences(itinerary.traveler_preferences);
           renderItinerary(itinerary);
           const savedTrip = await saveItineraryRecord(itinerary, apiFetch);
           currentSavedTripId = savedTrip.id;
+          updateSaveButton();
           sessionStorage.removeItem('roam_pending_trip');
           showToast('Trip saved to your account.');
         } else {
           const trip = JSON.parse(openTrip);
+          applyTravelerPreferences(trip.itinerary?.traveler_preferences);
           renderItinerary(trip.itinerary);
           currentSavedTripId = trip.id;
+          updateSaveButton();
           sessionStorage.removeItem('roam_open_trip');
         }
       } catch (error) {
@@ -393,6 +440,39 @@
 
     function clearChat() { location.reload(); }
 
+    function readTravelerPreferences() {
+      return {
+        pace: document.getElementById('traveler-pace').value,
+        interests: [...document.querySelectorAll('[data-traveler-interest]:checked')].map(input => input.value),
+        food_preferences: [...document.querySelectorAll('[data-food-preference]:checked')].map(input => input.value),
+        traveling_with_kids: document.getElementById('traveling-with-kids').checked,
+        traveling_with_seniors: document.getElementById('traveling-with-seniors').checked,
+      };
+    }
+
+    function applyTravelerPreferences(preferences = {}) {
+      if (['relaxed', 'balanced', 'packed'].includes(preferences.pace)) {
+        document.getElementById('traveler-pace').value = preferences.pace;
+      }
+      for (const input of document.querySelectorAll('[data-traveler-interest]')) {
+        input.checked = (preferences.interests || []).includes(input.value);
+      }
+      for (const input of document.querySelectorAll('[data-food-preference]')) {
+        input.checked = (preferences.food_preferences || []).includes(input.value);
+      }
+      document.getElementById('traveling-with-kids').checked = Boolean(preferences.traveling_with_kids);
+      document.getElementById('traveling-with-seniors').checked = Boolean(preferences.traveling_with_seniors);
+    }
+
+    function parseDayReplanRequest(text) {
+      const dayMatch = text.match(/\bday\s+(\d+)\b/i);
+      if (!dayMatch) return null;
+      if (!/\b(relaxed|relax|slower|less packed|easier|packed|busier|more stops|regenerate|re-?plan|redo)\b/i.test(text)) {
+        return null;
+      }
+      return Number(dayMatch[1]);
+    }
+
     async function handleSendMessage(e) {
       e.preventDefault();
       if (isLoading) return;
@@ -401,6 +481,11 @@
       const text = input.value.trim();
       if (!text) return;
       const aiDataConsent = document.getElementById('ai-data-consent').checked;
+      const dayToReplan = parseDayReplanRequest(text);
+      if (currentItinerary && dayToReplan) {
+        await regenerateItineraryDay(dayToReplan, text);
+        return;
+      }
 
       isLoading = true;
       input.value = '';
@@ -417,7 +502,11 @@
         const response = await fetch(`${API_BASE}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text, ai_data_consent: aiDataConsent }),
+          body: JSON.stringify({
+            message: text,
+            ai_data_consent: aiDataConsent,
+            traveler_preferences: readTravelerPreferences(),
+          }),
         });
 
         if (!response.ok) throw new Error(`Backend error: ${response.status}`);
@@ -425,6 +514,7 @@
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let aiText = '';
+        let streamFailed = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -444,7 +534,15 @@
                 aiText = data.message;
                 updateAIBubble(aiBubbleId, aiText);
               } else if (data.type === 'itinerary') {
+                currentSavedTripId = null;
+                itineraryDirty = false;
+                applyTravelerPreferences(data.data?.traveler_preferences);
                 renderItinerary(data.data);
+              } else if (data.type === 'error') {
+                streamFailed = true;
+                aiText = data.message || 'Trip generation failed.';
+                updateAIBubble(aiBubbleId, `⚠️ ${aiText}`);
+                updatePanelBadge('Error', 'bg-red-100 text-red-700');
               } else if (data.type === 'done') {
                 break;
               }
@@ -453,10 +551,53 @@
         }
 
         if (!aiText) updateAIBubble(aiBubbleId, 'The response did not include a message. Check the trip outline for any available results, or try again.');
-        updatePanelBadge('Ready ✓', 'bg-green-100 text-green-700');
+        if (!streamFailed) updatePanelBadge('Ready ✓', 'bg-green-100 text-green-700');
 
       } catch (err) {
         updateAIBubble(aiBubbleId, `⚠️ ${err.message}`);
+        updatePanelBadge('Error', 'bg-red-100 text-red-700');
+      } finally {
+        document.getElementById('ai-data-consent').checked = false;
+        isLoading = false;
+        setLoadingState(false);
+        scrollChat();
+      }
+    }
+
+    async function regenerateItineraryDay(dayNumber, instruction = '') {
+      if (!currentItinerary || isLoading) return;
+      const input = document.getElementById('chat-input');
+      const message = instruction || `Regenerate day ${dayNumber} using my selected traveler preferences.`;
+      input.value = '';
+      isLoading = true;
+      setLoadingState(true);
+      appendUserMessage(message);
+      resetToolActivity();
+      addToolStatus(`🧭 Replanning day ${dayNumber}; other days and locked activities will be kept.`);
+      updatePanelBadge('Updating day...', 'bg-amber-100 text-amber-700');
+      const aiBubbleId = 'ai-msg-' + Date.now();
+      appendAITypingBubble(aiBubbleId);
+
+      try {
+        const response = await fetch(`${API_BASE}/itinerary/regenerate-day`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            itinerary: currentItinerary,
+            day: Number(dayNumber),
+            instruction: message,
+            traveler_preferences: readTravelerPreferences(),
+          }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.detail || `Backend error: ${response.status}`);
+        currentItinerary = result.itinerary;
+        renderItinerary(currentItinerary);
+        markItineraryChanged();
+        updateAIBubble(aiBubbleId, `Day ${dayNumber} was updated. Other days and locked activities were preserved. Review the changes, then save the trip.`);
+        updatePanelBadge('Ready ✓', 'bg-green-100 text-green-700');
+      } catch (error) {
+        updateAIBubble(aiBubbleId, `⚠️ ${error.message}`);
         updatePanelBadge('Error', 'bg-red-100 text-red-700');
       } finally {
         document.getElementById('ai-data-consent').checked = false;
@@ -550,6 +691,20 @@
     // ── Render Multi-Modal Itinerary ──────────────────────────────────────────
     function renderItinerary(data) {
       currentItinerary = data;
+      if (Array.isArray(data.day_plan)) {
+        data.day_plan.forEach(day => {
+          day.activities = Array.isArray(day.activities) ? day.activities : [];
+          day.activities.forEach((activity, index) => {
+            if (!activity.id) activity.id = `day-${day.day}-activity-${index + 1}`;
+            activity.locked = Boolean(activity.locked);
+            if (activity.cost_inr === undefined) activity.cost_inr = null;
+            if (!activity.notes) activity.notes = activity.description || '';
+            if (activity.place === undefined) {
+              activity.place = activity.type === 'attraction' ? activity.title || null : null;
+            }
+          });
+        });
+      }
       if (window.innerWidth < 768) setMobileView('itinerary');
       const panel = document.getElementById('itinerary-panel');
       const emptyState = document.getElementById('empty-state');
@@ -1018,42 +1173,169 @@
           </div>
         `);
         data.day_plan.forEach((day, i) => {
+          const activityCards = day.activities.map((act, activityIndex) => {
+            const locked = Boolean(act.locked);
+            const moveOptions = data.day_plan.map(targetDay => `
+              <option value="${escHtml(targetDay.day)}" ${Number(targetDay.day) === Number(day.day) ? 'selected' : ''}>
+                Day ${escHtml(targetDay.day)}
+              </option>
+            `).join('');
+            const freshness = act.last_updated
+              ? ` · Updated ${new Date(act.last_updated).toLocaleString()}`
+              : '';
+            return `
+              <article
+                class="bg-white border border-outline-variant rounded-xl p-3 flex gap-2.5 items-start ${act.type === 'food' ? 'border-amber-200 bg-amber-50/30' : ''}"
+                data-activity-id="${escHtml(act.id)}"
+                data-day-number="${escHtml(day.day)}"
+                draggable="true"
+                aria-label="${escHtml(act.title || 'Itinerary activity')}"
+              >
+                <span class="material-symbols-outlined text-on-surface-variant text-base flex-shrink-0 mt-0.5" aria-hidden="true">drag_indicator</span>
+                <span class="material-symbols-outlined text-primary text-base flex-shrink-0 mt-0.5">${activityIcon(act.type, act.title)}</span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex justify-between items-start gap-2">
+                    <p class="text-xs font-bold text-on-surface">${escHtml(act.title || '')}</p>
+                    ${act.type === 'attraction' ? `
+                      <button data-audio-text="${escHtml(`${act.title || ''}: ${act.description || ''}`)}" title="Listen to Audio Guide" aria-label="Listen to ${escHtml(act.title || 'activity')}" class="audio-guide-button text-primary hover:text-amber-700 p-0.5 flex items-center gap-0.5 flex-shrink-0">
+                        <span class="material-symbols-outlined text-sm">volume_up</span>
+                      </button>
+                    ` : ''}
+                  </div>
+                  <p class="text-[11px] text-on-surface-variant leading-relaxed mt-0.5">${escHtml(act.description || '')}</p>
+                  <div class="flex flex-wrap gap-1.5 mt-1.5">
+                    <span class="text-[10px] text-on-surface-variant bg-surface-container px-2 py-0.5 rounded font-medium">${escHtml(act.time || '')}</span>
+                    <span class="text-[10px] text-on-surface-variant bg-surface-container px-2 py-0.5 rounded font-medium">${escHtml(act.source_label || 'Estimate')}${escHtml(freshness)}</span>
+                    ${act.cost_inr !== null && Number.isFinite(Number(act.cost_inr)) ? `<span class="text-[10px] text-on-surface-variant bg-surface-container px-2 py-0.5 rounded font-medium">₹${Number(act.cost_inr).toLocaleString('en-IN')}</span>` : '<span class="text-[10px] text-on-surface-variant">Cost not provided</span>'}
+                  </div>
+                  ${act.plan_b ? `<p class="text-[10px] text-amber-800 mt-2"><strong>Plan B:</strong> ${escHtml(act.plan_b)}</p>` : ''}
+                  ${act.notes && act.notes !== act.description ? `<p class="text-[10px] text-on-surface-variant mt-1">${escHtml(act.notes)}</p>` : ''}
+                  <div class="flex flex-wrap items-center gap-2 mt-2">
+                    <select data-move-activity="${escHtml(act.id)}" aria-label="Move ${escHtml(act.title || 'activity')} to another day" class="rounded-md border border-outline-variant bg-white px-2 py-1 text-[10px]">
+                      ${moveOptions}
+                    </select>
+                    <button type="button" data-activity-action="lock" data-activity-id="${escHtml(act.id)}" aria-pressed="${String(locked)}" class="rounded-md border border-outline-variant px-2 py-1 text-[10px] font-semibold">
+                      ${locked ? '🔒 Locked' : 'Lock'}
+                    </button>
+                    <button type="button" data-activity-action="delete" data-activity-id="${escHtml(act.id)}" ${locked ? 'disabled' : ''} class="rounded-md border border-outline-variant px-2 py-1 text-[10px] font-semibold disabled:opacity-40">
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </article>
+            `;
+          }).join('');
           panel.insertAdjacentHTML('beforeend', `
-            <div class="itinerary-day space-y-2" style="animation-delay: ${i * 0.06}s">
+            <section class="itinerary-day space-y-2" data-itinerary-day="${escHtml(day.day)}" style="animation-delay: ${i * 0.06}s">
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
                   <div class="w-7 h-7 rounded-full bg-primary text-white font-bold text-xs flex items-center justify-center flex-shrink-0">${escHtml(day.day)}</div>
                   <h5 class="font-bold text-sm text-on-surface">${escHtml(day.date)} ${escHtml(day.weather?.icon || '')}</h5>
                 </div>
-                ${day.is_rainy ? `<span class="text-[10px] bg-blue-100 text-blue-800 font-semibold px-2 py-0.5 rounded-full">🌧️ Rain forecast</span>` : ''}
+                <div class="flex items-center gap-2">
+                  ${day.is_rainy ? `<span class="text-[10px] bg-blue-100 text-blue-800 font-semibold px-2 py-0.5 rounded-full">🌧️ Rain forecast</span>` : ''}
+                  <button type="button" data-regenerate-day="${escHtml(day.day)}" class="rounded-lg border border-outline-variant px-2 py-1 text-[10px] font-semibold hover:border-primary" aria-label="Regenerate day ${escHtml(day.day)}">
+                    Regenerate day
+                  </button>
+                </div>
               </div>
               ${day.travel_tip ? `<p class="text-[11px] text-on-surface-variant italic ml-9 px-2 py-1 bg-surface-container rounded-lg">${escHtml(day.travel_tip)}</p>` : ''}
+              ${(day.traveler_notes || []).map(note => `<p class="text-[10px] text-on-surface-variant ml-9">${escHtml(note)}</p>`).join('')}
               <div class="ml-3 pl-4 border-l-2 border-dashed border-outline-variant space-y-2">
-                ${day.activities.map(act => `
-                  <div class="bg-white border border-outline-variant rounded-xl p-3 flex gap-2.5 items-start ${act.type === 'food' ? 'border-amber-200 bg-amber-50/30' : ''}">
-                    <span class="material-symbols-outlined text-primary text-base flex-shrink-0 mt-0.5">${activityIcon(act.type, act.title)}</span>
-                    <div class="flex-1">
-                      <div class="flex justify-between items-start">
-                        <p class="text-xs font-bold text-on-surface">${escHtml(act.title || '')}</p>
-                        ${act.type === 'attraction' ? `
-                          <button data-audio-text="${escHtml(`${act.title || ''}: ${act.description || ''}`)}" title="Listen to Audio Guide" class="audio-guide-button text-primary hover:text-amber-700 p-0.5 flex items-center gap-0.5">
-                            <span class="material-symbols-outlined text-sm">volume_up</span>
-                          </button>
-                        ` : ''}
-                      </div>
-                      <p class="text-[11px] text-on-surface-variant leading-relaxed mt-0.5">${escHtml(act.description || '')}</p>
-                      <span class="text-[10px] text-on-surface-variant mt-1 inline-block bg-surface-container px-2 py-0.5 rounded font-medium">${escHtml(act.time || '')}</span>
-                    </div>
-                  </div>
-                `).join('')}
+                <div data-day-plan-number="${escHtml(day.day)}" class="space-y-2 min-h-8 rounded-lg" aria-label="Day ${escHtml(day.day)} activities">
+                  ${activityCards}
+                </div>
               </div>
-            </div>
+            </section>
           `);
         });
         panel.querySelectorAll('.audio-guide-button').forEach(button => {
           button.addEventListener('click', () => speakText(button.dataset.audioText || ''));
         });
+        bindItineraryEditorEvents(panel);
       }
+      updateSaveButton();
+    }
+
+    function updateSaveButton() {
+      const button = document.getElementById('save-trip-button');
+      if (!button) return;
+      const label = currentSavedTripId ? 'Save changes' : 'Save trip';
+      button.innerHTML = `<span class="material-symbols-outlined text-base">bookmark</span> ${label}`;
+    }
+
+    function markItineraryChanged() {
+      itineraryDirty = true;
+      updateSaveButton();
+    }
+
+    function findItineraryActivity(activityId) {
+      for (const day of currentItinerary?.day_plan || []) {
+        const index = day.activities.findIndex(activity => activity.id === activityId);
+        if (index >= 0) return { day, index, activity: day.activities[index] };
+      }
+      return null;
+    }
+
+    function moveItineraryActivity(activityId, targetDayNumber) {
+      const found = findItineraryActivity(activityId);
+      const targetDay = currentItinerary?.day_plan?.find(day => Number(day.day) === Number(targetDayNumber));
+      if (!found || !targetDay || found.day === targetDay) return;
+      const [activity] = found.day.activities.splice(found.index, 1);
+      targetDay.activities.push(activity);
+      markItineraryChanged();
+      renderItinerary(currentItinerary);
+    }
+
+    function bindItineraryEditorEvents(panel) {
+      if (itineraryEditorEventsBound) return;
+      itineraryEditorEventsBound = true;
+
+      panel.addEventListener('click', event => {
+        const button = event.target.closest('button[data-activity-action], button[data-regenerate-day]');
+        if (!button) return;
+        const dayNumber = button.dataset.regenerateDay;
+        if (dayNumber) {
+          regenerateItineraryDay(Number(dayNumber));
+          return;
+        }
+
+        const found = findItineraryActivity(button.dataset.activityId);
+        if (!found) return;
+        if (button.dataset.activityAction === 'lock') {
+          found.activity.locked = !found.activity.locked;
+          markItineraryChanged();
+          renderItinerary(currentItinerary);
+        } else if (button.dataset.activityAction === 'delete' && !found.activity.locked) {
+          found.day.activities.splice(found.index, 1);
+          markItineraryChanged();
+          renderItinerary(currentItinerary);
+        }
+      });
+
+      panel.addEventListener('change', event => {
+        const select = event.target.closest('select[data-move-activity]');
+        if (select) moveItineraryActivity(select.dataset.moveActivity, select.value);
+      });
+
+      panel.addEventListener('dragstart', event => {
+        const card = event.target.closest('[data-activity-id]');
+        if (!card || event.target.closest('button, select')) return;
+        event.dataTransfer?.setData('text/plain', card.dataset.activityId);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+      });
+
+      panel.addEventListener('dragover', event => {
+        if (event.target.closest('[data-day-plan-number]')) event.preventDefault();
+      });
+
+      panel.addEventListener('drop', event => {
+        const dayContainer = event.target.closest('[data-day-plan-number]');
+        const activityId = event.dataTransfer?.getData('text/plain');
+        if (!dayContainer || !activityId) return;
+        event.preventDefault();
+        moveItineraryActivity(activityId, dayContainer.dataset.dayPlanNumber);
+      });
     }
 
     function initLeafletMap(destination, places, hotels) {
@@ -1216,9 +1498,32 @@
       return result;
     }
 
+    async function updateItineraryRecord(tripId, itinerary, apiFetch) {
+      const rawCost = itinerary.estimated_cost_inr;
+      const estimatedCost = rawCost !== null && rawCost !== undefined && rawCost !== ''
+        && Number.isFinite(Number(rawCost))
+        ? Number(rawCost)
+        : null;
+      const dates = itinerary.dates && typeof itinerary.dates === 'object' && !Array.isArray(itinerary.dates)
+        ? itinerary.dates
+        : {};
+      const response = await apiFetch(`/trips/${encodeURIComponent(tripId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          days: Number(itinerary.days),
+          dates,
+          estimated_cost_inr: estimatedCost,
+          itinerary,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not save itinerary changes.');
+      return result;
+    }
+
     async function saveCurrentTrip() {
       if (!currentItinerary) return alert('Plan a trip first!');
-      if (currentSavedTripId) return showToast('This trip is already saved.');
+      if (currentSavedTripId && !itineraryDirty) return showToast('There are no unsaved changes.');
 
       const button = document.getElementById('save-trip-button');
       button.disabled = true;
@@ -1231,9 +1536,16 @@
           window.location.href = 'account.html?next=plan.html';
           return;
         }
-        const savedTrip = await saveItineraryRecord(currentItinerary, apiFetch);
-        currentSavedTripId = savedTrip.id;
-        showToast('Trip saved to your account.');
+        if (currentSavedTripId) {
+          await updateItineraryRecord(currentSavedTripId, currentItinerary, apiFetch);
+          showToast('Trip changes saved.');
+        } else {
+          const savedTrip = await saveItineraryRecord(currentItinerary, apiFetch);
+          currentSavedTripId = savedTrip.id;
+          showToast('Trip saved to your account.');
+        }
+        itineraryDirty = false;
+        updateSaveButton();
       } catch (error) {
         showToast(error.message || 'Could not save this trip.');
       } finally {
