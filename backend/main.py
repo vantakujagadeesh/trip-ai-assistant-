@@ -72,6 +72,7 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+    ai_data_consent: bool = False
 
 
 class TripCreate(BaseModel):
@@ -205,7 +206,10 @@ async def chat(request: ChatRequest):
             # Stream tool status updates first
             yield f"data: {json.dumps({'type': 'status', 'message': '🔍 Processing your request...'})}\n\n"
 
-            result = await run_agent(request.message)
+            result = await run_agent(
+                request.message,
+                ai_data_consent=request.ai_data_consent,
+            )
 
             # Stream tool activity updates
             for status in result.get("tool_status", []):

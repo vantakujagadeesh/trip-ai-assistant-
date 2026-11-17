@@ -10,7 +10,14 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from mcp_tools.buses import search_buses
-from mcp_tools.itinerary import _build_weather_adaptive_day_plan, build_itinerary
+from mcp_tools.flights import search_flights
+from mcp_tools.hotels import search_hotels
+from mcp_tools.itinerary import (
+    _attach_nearby_places,
+    _build_transport_and_route_advice,
+    _build_weather_adaptive_day_plan,
+    build_itinerary,
+)
 from mcp_tools.places import get_places
 from mcp_tools.trains import search_trains
 from graph.agent import _smart_parse_intent
@@ -68,6 +75,111 @@ class LiveProviderTruthfulnessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "live_catalog")
         self.assertEqual(result["places"][0]["latitude"], 26.9124)
         self.assertEqual(result["places"][0]["longitude"], 75.7873)
+
+    async def test_live_flight_offer_exposes_provider_seats_without_booking(self):
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={
+                    "data": [{
+                        "id": "offer-1",
+                        "numberOfBookableSeats": 3,
+                        "price": {"total": "5400"},
+                        "itineraries": [{
+                            "duration": "PT2H",
+                            "segments": [{
+                                "carrierCode": "AI",
+                                "departure": {"at": "2026-12-01T10:00:00"},
+                                "arrival": {"at": "2026-12-01T12:00:00"},
+                            }],
+                        }],
+                    }],
+                },
+            )
+        )
+        client = httpx.AsyncClient(transport=transport)
+        with patch.dict(os.environ, {"AMADEUS_API_KEY": "test-key", "AMADEUS_API_SECRET": "test-secret"}):
+            with patch("mcp_tools.flights.AMADEUS_BASE_URL", "https://api.amadeus.com"), patch(
+                "mcp_tools.flights._get_amadeus_token",
+                new_callable=AsyncMock,
+                return_value="token",
+            ), patch("mcp_tools.flights.httpx.AsyncClient", return_value=client):
+                result = await search_flights("DEL", "JAI", "2026-12-01")
+
+        self.assertEqual(result["status"], "live")
+        self.assertEqual(result["offers"][0]["bookable_seats"], 3)
+        self.assertEqual(result["offers"][0]["booking_status"], "not_booked")
+
+    async def test_live_hotel_offer_keeps_coordinates_and_never_invents_room_count(self):
+        def respond(request):
+            if request.url.path.endswith("/by-city"):
+                return httpx.Response(
+                    200,
+                    json={"data": [{
+                        "hotelId": "hotel-1",
+                        "name": "Provider Hotel",
+                        "geoCode": {"latitude": 26.9124, "longitude": 75.7873},
+                    }]},
+                )
+            return httpx.Response(
+                200,
+                json={"data": [{
+                    "hotel": {
+                        "hotelId": "hotel-1",
+                        "name": "Provider Hotel",
+                        "rating": "4",
+                        "address": {"lines": ["Pink City"]},
+                    },
+                    "offers": [{
+                        "id": "hotel-offer-1",
+                        "price": {"total": "6000", "currency": "INR"},
+                        "room": {"typeEstimated": {"category": "STANDARD"}},
+                    }],
+                }]},
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        with patch.dict(os.environ, {"AMADEUS_API_KEY": "test-key", "AMADEUS_API_SECRET": "test-secret"}):
+            with patch("mcp_tools.hotels.AMADEUS_BASE_URL", "https://api.amadeus.com"), patch(
+                "mcp_tools.hotels._get_amadeus_token",
+                new_callable=AsyncMock,
+                return_value="token",
+            ), patch("mcp_tools.hotels.httpx.AsyncClient", return_value=client):
+                result = await search_hotels("JAI", "2026-12-01", "2026-12-03")
+
+        hotel = result["hotels"][0]
+        self.assertEqual(result["status"], "live")
+        self.assertEqual((hotel["latitude"], hotel["longitude"]), (26.9124, 75.7873))
+        self.assertEqual(hotel["offer_id"], "hotel-offer-1")
+        self.assertIsNone(hotel["rooms_available"])
+        self.assertEqual(hotel["booking_status"], "not_booked")
+
+    def test_hotels_report_nearby_places_only_when_both_have_coordinates(self):
+        hotels = [{"name": "Hotel", "latitude": 26.9124, "longitude": 75.7873}]
+        places = [
+            {"name": "Nearby landmark", "latitude": 26.9224, "longitude": 75.7873},
+            {"name": "Unlocated suggestion"},
+        ]
+
+        enriched = _attach_nearby_places(hotels, places)
+
+        self.assertEqual(enriched[0]["nearby_places"][0]["name"], "Nearby landmark")
+        self.assertAlmostEqual(enriched[0]["nearby_places"][0]["distance_km"], 1.1, places=1)
+
+    def test_transport_comparison_does_not_invent_missing_live_prices(self):
+        options, recommendation = _build_transport_and_route_advice(
+            origin="Delhi",
+            destination="Jaipur",
+            flight_data={},
+            train_data={"availability_checked": True, "trains": [{"train_name": "Provider train"}]},
+            bus_data={"availability_checked": True, "buses": [{"operator": "Provider bus"}]},
+            cab_data={"availability_checked": True, "outstation_cabs": [{"category": "Sedan"}]},
+            guests=2,
+            budget_inr=None,
+        )
+
+        self.assertEqual(options, [])
+        self.assertEqual(recommendation["best_mode"], "No live route quote available")
 
     async def test_train_search_does_not_invent_schedules_or_availability(self):
         result = await search_trains("Delhi", "Jaipur", "2026-12-01")

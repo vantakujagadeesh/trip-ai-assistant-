@@ -1,6 +1,7 @@
 """Build an itinerary outline from configured travel-data providers."""
 import asyncio
 from datetime import datetime, timedelta
+from math import asin, cos, isfinite, radians, sin, sqrt
 from typing import Optional, List, Dict, Any
 
 from mcp_tools.flights import search_flights
@@ -109,6 +110,8 @@ async def build_itinerary(
         if isinstance(hotel_data, dict) and hotel_data.get("live_inventory")
         else []
     )
+    place_list = places_data.get("places", []) if isinstance(places_data, dict) else []
+    hotels_list = _attach_nearby_places(hotels_list, place_list)
     best_hotel = hotels_list[0] if hotels_list else None
 
     trains_list = (
@@ -204,7 +207,7 @@ async def build_itinerary(
         "cultural_guide": _get_cultural_safety_guide(destination),
         "packing_checklist": _get_packing_checklist(destination, combined_forecast),
 
-        "top_places": places_data.get("places", [])[:6] if isinstance(places_data, dict) else [],
+        "top_places": place_list[:6],
         "top_restaurants": restaurants_data.get("places", [])[:4] if isinstance(restaurants_data, dict) else [],
         "meal_suggestions": meals_data if isinstance(meals_data, dict) else {},
         "day_plan": day_plan,
@@ -224,6 +227,79 @@ def _provider_status(result) -> dict:
     }
 
 
+def _coordinates(item: dict) -> tuple[float, float] | None:
+    if not isinstance(item, dict):
+        return None
+    try:
+        latitude = float(item.get("latitude"))
+        longitude = float(item.get("longitude"))
+    except (TypeError, ValueError):
+        return None
+    if not isfinite(latitude) or not isfinite(longitude):
+        return None
+    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+        return None
+    return latitude, longitude
+
+
+def _distance_km(first: tuple[float, float], second: tuple[float, float]) -> float:
+    latitude1, longitude1 = map(radians, first)
+    latitude2, longitude2 = map(radians, second)
+    latitude_delta = latitude2 - latitude1
+    longitude_delta = longitude2 - longitude1
+    haversine = (
+        sin(latitude_delta / 2) ** 2
+        + cos(latitude1) * cos(latitude2) * sin(longitude_delta / 2) ** 2
+    )
+    return 6371.0088 * 2 * asin(sqrt(haversine))
+
+
+def _attach_nearby_places(hotels: list, places: list) -> list:
+    place_points = []
+    for place in places:
+        coordinates = _coordinates(place)
+        if coordinates:
+            place_points.append((place, coordinates))
+
+    enriched_hotels = []
+    for hotel in hotels:
+        hotel = dict(hotel)
+        hotel_coordinates = _coordinates(hotel)
+        nearby = []
+        if hotel_coordinates:
+            distances = [
+                (
+                    _distance_km(hotel_coordinates, coordinates),
+                    place,
+                )
+                for place, coordinates in place_points
+            ]
+            distances.sort(key=lambda result: result[0])
+            nearby = [
+                {"name": place.get("name", "Place listing"), "distance_km": round(distance, 1)}
+                for distance, place in distances
+                if distance <= 10
+            ][:3]
+            hotel["nearest_place_distance_km"] = (
+                round(distances[0][0], 1) if distances else None
+            )
+        else:
+            hotel["nearest_place_distance_km"] = None
+        hotel["nearby_places"] = nearby
+        enriched_hotels.append(hotel)
+    return enriched_hotels
+
+
+def _numeric_price(value) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        return None
+    return price if isfinite(price) and price > 0 else None
+
+
 def _build_transport_and_route_advice(origin, destination, flight_data, train_data, bus_data, cab_data, guests, budget_inr):
     """Build route advice only from provider-backed options."""
     options = []
@@ -233,59 +309,74 @@ def _build_transport_and_route_advice(origin, destination, flight_data, train_da
     # 1. Flight
     if isinstance(flight_data, dict) and flight_data.get("live_quotes") and flight_data.get("offers"):
         top_f = flight_data["offers"][0]
-        price = top_f.get("price_inr")
-        options.append({
-            "mode": "Flight ✈️",
-            "provider": f"{top_f.get('airline', 'Flight')}",
-            "duration": top_f.get("duration", "Duration not provided").replace("PT", "").replace("H", "h ").replace("M", "m"),
-            "price_per_person_inr": price,
-            "total_group_price_inr": price * guests if isinstance(price, (int, float)) else None,
-            "badge": "Live quote",
-            "badge_color": "bg-emerald-100 text-emerald-800"
-        })
+        price = _numeric_price(top_f.get("price_inr"))
+        if price is not None:
+            options.append({
+                "mode": "Flight ✈️",
+                "provider": f"{top_f.get('airline', 'Flight')}",
+                "duration": top_f.get("duration", "Duration not provided").replace("PT", "").replace("H", "h ").replace("M", "m"),
+                "price_per_person_inr": price,
+                "total_group_price_inr": price * guests,
+                "bookable_seats": top_f.get("bookable_seats"),
+                "booking_status": "not_booked",
+                "badge": "Live quote",
+                "badge_color": "bg-emerald-100 text-emerald-800"
+            })
 
     # 2. Train
     if isinstance(train_data, dict) and train_data.get("availability_checked") and train_data.get("trains"):
         top_t = train_data["trains"][0]
-        options.append({
-            "mode": "Train 🚆",
-            "provider": f"{top_t.get('train_name', 'Express')}",
-            "duration": top_t.get("duration", "7h 45m"),
-            "price_per_person_inr": top_t.get("cheapest_fare_inr", 1815),
-            "total_group_price_inr": top_t.get("cheapest_fare_inr", 1815) * guests,
-            "badge": "Most Scenic & Eco",
-            "badge_color": "bg-blue-100 text-blue-800"
-        })
+        price = _numeric_price(top_t.get("cheapest_fare_inr") or top_t.get("fare_inr"))
+        if price is not None:
+            options.append({
+                "mode": "Train 🚆",
+                "provider": f"{top_t.get('train_name', 'Train')}",
+                "duration": top_t.get("duration", "Duration not provided"),
+                "price_per_person_inr": price,
+                "total_group_price_inr": price * guests,
+                "bookable_seats": top_t.get("seats_available"),
+                "booking_status": "not_booked",
+                "badge": "Live quote",
+                "badge_color": "bg-blue-100 text-blue-800"
+            })
 
     # 3. Bus
     if isinstance(bus_data, dict) and bus_data.get("availability_checked") and bus_data.get("buses"):
         top_b = bus_data["buses"][0]
-        options.append({
-            "mode": "Intercity Bus 🚌",
-            "provider": f"{top_b.get('operator', 'Volvo Sleeper')}",
-            "duration": top_b.get("duration", "12h 30m"),
-            "price_per_person_inr": top_b.get("fare_inr", 990),
-            "total_group_price_inr": top_b.get("fare_inr", 990) * guests,
-            "badge": "Overnight Saver",
-            "badge_color": "bg-amber-100 text-amber-800"
-        })
+        price = _numeric_price(top_b.get("fare_inr"))
+        if price is not None:
+            options.append({
+                "mode": "Intercity Bus 🚌",
+                "provider": f"{top_b.get('operator', 'Bus provider')}",
+                "duration": top_b.get("duration", "Duration not provided"),
+                "price_per_person_inr": price,
+                "total_group_price_inr": price * guests,
+                "bookable_seats": top_b.get("seats_available"),
+                "booking_status": "not_booked",
+                "badge": "Live quote",
+                "badge_color": "bg-amber-100 text-amber-800"
+            })
 
     # 4. Outstation Cab
     if isinstance(cab_data, dict) and cab_data.get("availability_checked") and cab_data.get("outstation_cabs"):
         top_c = cab_data["outstation_cabs"][0]
-        options.append({
-            "mode": "Outstation Taxi 🚗",
-            "provider": f"{top_c.get('category', 'Sedan Cab')}",
-            "duration": "Doorstep to Doorstep",
-            "price_per_person_inr": round(top_c.get("estimated_one_way_inr", 3500) / max(guests, 1), 0),
-            "total_group_price_inr": top_c.get("estimated_one_way_inr", 3500),
-            "badge": "Door-to-Door",
-            "badge_color": "bg-purple-100 text-purple-800"
-        })
+        total_price = _numeric_price(top_c.get("estimated_one_way_inr"))
+        if total_price is not None:
+            options.append({
+                "mode": "Outstation Taxi 🚗",
+                "provider": f"{top_c.get('category', 'Cab provider')}",
+                "duration": "Doorstep to doorstep",
+                "price_per_person_inr": round(total_price / max(guests, 1), 2),
+                "total_group_price_inr": total_price,
+                "booking_status": "not_booked",
+                "badge": "Live quote",
+                "badge_color": "bg-purple-100 text-purple-800"
+            })
 
     if options:
-        best_mode_title = options[0]["mode"]
-        best_mode_reason = "A live provider quote is available; confirm the final price and availability with the booking provider."
+        options.sort(key=lambda item: item["price_per_person_inr"])
+        best_mode_title = f"Lowest quoted price: {options[0]['mode']}"
+        best_mode_reason = "Sorted by provider-returned price only; confirm schedules, availability, and booking terms with the provider."
 
     recommendation = {
         "best_mode": best_mode_title,

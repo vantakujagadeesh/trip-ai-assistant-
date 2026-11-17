@@ -65,6 +65,7 @@ async def search_flights(
         "cheapest_inr": None,
         "source": "Amadeus",
         "live_quotes": False,
+        "availability_checked": False,
     }
     if not os.getenv("AMADEUS_API_KEY") or not os.getenv("AMADEUS_API_SECRET"):
         return {**unavailable, "status": "not_configured", "note": "Live flight search is not configured."}
@@ -102,17 +103,23 @@ async def search_flights(
                 price = float(offer["price"]["total"])
                 if budget_inr and price > budget_inr:
                     continue
+                bookable_seats = offer.get("numberOfBookableSeats")
+                if isinstance(bookable_seats, bool) or not isinstance(bookable_seats, int) or bookable_seats < 0:
+                    bookable_seats = None
                 itineraries = offer.get("itineraries", [{}])
                 segments = itineraries[0].get("segments", [{}]) if itineraries else [{}]
                 first_seg = segments[0] if segments else {}
                 last_seg = segments[-1] if segments else {}
                 offers.append({
+                    "offer_id": offer.get("id"),
                     "airline": first_seg.get("carrierCode", "Unknown"),
                     "departure": first_seg.get("departure", {}).get("at", ""),
                     "arrival": last_seg.get("arrival", {}).get("at", ""),
                     "duration": itineraries[0].get("duration", ""),
                     "stops": len(segments) - 1,
                     "price_inr": price,
+                    "bookable_seats": bookable_seats,
+                    "booking_status": "not_booked",
                     "booking_class": offer.get("travelerPricings", [{}])[0].get("fareDetailsBySegment", [{}])[0].get("cabin", "ECONOMY"),
                 })
             is_sandbox = "test.api.amadeus.com" in AMADEUS_BASE_URL
@@ -124,6 +131,7 @@ async def search_flights(
                 "status": "sandbox" if is_sandbox else ("live" if offers else "no_results"),
                 "source": "Amadeus",
                 "live_quotes": not is_sandbox and bool(offers),
+                "availability_checked": not is_sandbox,
                 "checked_at": datetime.now(timezone.utc).isoformat(),
                 "note": "Sandbox offers are test data and are not bookable." if is_sandbox else None,
             }

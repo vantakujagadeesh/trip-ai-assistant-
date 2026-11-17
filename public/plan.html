@@ -161,6 +161,15 @@
 
       <!-- Input Bar -->
       <div class="p-4 bg-white border-t border-outline-variant">
+        <label for="ai-data-consent" class="max-w-3xl mx-auto mb-2 flex items-start gap-2 text-[10px] leading-relaxed text-on-surface-variant">
+          <input id="ai-data-consent" type="checkbox" class="mt-0.5 flex-shrink-0">
+          <span>
+            Optional Gemini AI: when checked, your message, trip details, and relevant provider results are sent to Google.
+            Email and phone patterns are redacted. Google may use free-tier content to improve its products.
+            Don't include names, account, passport, or payment details. If unchecked, Gemini is skipped; connected travel providers may still receive search details.
+            <a href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noopener noreferrer" class="underline">Free-tier details</a>.
+          </span>
+        </label>
         <form id="chat-form" onsubmit="handleSendMessage(event)" class="max-w-3xl mx-auto flex items-center gap-2 bg-surface-container-low border border-outline-variant rounded-2xl p-2 shadow-sm focus-within:ring-2 ring-primary-container transition-all">
           <button type="button" onclick="clearChat()" title="Clear chat" class="p-2 text-on-surface-variant hover:text-primary transition-colors rounded-lg flex-shrink-0">
             <span class="material-symbols-outlined text-lg">refresh</span>
@@ -391,6 +400,7 @@
       const input = document.getElementById('chat-input');
       const text = input.value.trim();
       if (!text) return;
+      const aiDataConsent = document.getElementById('ai-data-consent').checked;
 
       isLoading = true;
       input.value = '';
@@ -407,7 +417,7 @@
         const response = await fetch(`${API_BASE}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text }),
+          body: JSON.stringify({ message: text, ai_data_consent: aiDataConsent }),
         });
 
         if (!response.ok) throw new Error(`Backend error: ${response.status}`);
@@ -449,6 +459,7 @@
         updateAIBubble(aiBubbleId, `⚠️ ${err.message}`);
         updatePanelBadge('Error', 'bg-red-100 text-red-700');
       } finally {
+        document.getElementById('ai-data-consent').checked = false;
         isLoading = false;
         setLoadingState(false);
         scrollChat();
@@ -752,15 +763,19 @@
           <div class="flex justify-between items-center px-1">
             <h4 class="text-xs font-bold text-on-surface flex items-center gap-1.5">
               <span class="material-symbols-outlined text-primary text-base">pin_drop</span>
-              Interactive Destination Map
+              Places & Live Hotel Offers
             </h4>
-            <span class="text-[10px] text-on-surface-variant font-medium">Map references</span>
+            <span class="text-[10px] text-on-surface-variant font-medium">Provider coordinates only</span>
           </div>
           <div id="trip-map"></div>
+          <div class="flex flex-wrap gap-3 px-1 text-[10px] text-on-surface-variant">
+            <span><span class="inline-block w-2 h-2 rounded-full bg-blue-600 mr-1"></span>Place listings</span>
+            <span><span class="inline-block w-2 h-2 rounded-full bg-primary mr-1"></span>Hotel offers</span>
+          </div>
         </div>
       `);
 
-      initLeafletMap(data.destination, data.top_places);
+      initLeafletMap(data.destination, data.top_places, data.all_hotels);
 
       // ── 3. Best Route Recommendation Card ─────────────────────────────────
       if (data.route_recommendation) {
@@ -788,20 +803,25 @@
             <div class="space-y-2">
               ${data.transport_comparison.map(item => {
                 let bookUrl = 'https://www.makemytrip.com';
-                let bookText = 'Book Now';
+                let bookText = 'Search options';
                 if (item.mode.includes('Flight')) {
                   bookUrl = `https://www.makemytrip.com/flights/`;
-                  bookText = 'MakeMyTrip ✈️';
+                  bookText = 'Search flights';
                 } else if (item.mode.includes('Train')) {
                   bookUrl = `https://www.irctc.co.in`;
-                  bookText = 'IRCTC 🚆';
+                  bookText = 'Search trains';
                 } else if (item.mode.includes('Bus')) {
                   bookUrl = `https://www.redbus.in`;
-                  bookText = 'RedBus 🚌';
+                  bookText = 'Search buses';
                 } else if (item.mode.includes('Taxi') || item.mode.includes('Cab')) {
                   bookUrl = `https://www.uber.com`;
-                  bookText = 'Uber / Taxi 🚗';
+                  bookText = 'Search rides';
                 }
+                const inventoryText = /Flight|Train|Bus/.test(item.mode)
+                  ? (Number.isInteger(item.bookable_seats)
+                    ? `${item.bookable_seats} seats reported`
+                    : 'Seat count not reported')
+                  : 'Quote only';
                 return `
                   <div class="flex items-center justify-between bg-surface-container-low p-3 rounded-xl border border-outline-variant hover:border-primary transition-all">
                     <div>
@@ -810,6 +830,7 @@
                         <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full ${TRANSPORT_BADGE_CLASSES.has(item.badge_color) ? item.badge_color : 'bg-gray-100 text-gray-800'}">${escHtml(item.badge)}</span>
                       </div>
                       <p class="text-[11px] text-on-surface-variant mt-0.5">${escHtml(item.provider)} • ${escHtml(item.duration)}</p>
+                      <p class="text-[10px] text-on-surface-variant mt-0.5">${escHtml(inventoryText)} · Not booked</p>
                     </div>
                     <div class="text-right flex items-center gap-3">
                       <div>
@@ -841,32 +862,94 @@
         `);
       }
 
-      // ── 4b. Recommended Hotel Card ─────────────────────────────────────────
-      if (data.recommended_hotel) {
-        const hotel = data.recommended_hotel;
-        const hotelBookUrl = `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(data.destination)}`;
+      // ── 4b. Provider-backed Hotel Offers ────────────────────────────────────
+      const hotelOffers = Array.isArray(data.all_hotels) ? data.all_hotels : [];
+      if (hotelOffers.length) {
+        const hotelCards = hotelOffers.map((hotel, index) => {
+          const pricePerNight = Number(hotel.price_per_night_inr);
+          const totalPrice = Number(hotel.total_inr);
+          const hasPrice = Number.isFinite(pricePerNight) && pricePerNight > 0;
+          const hasTotal = Number.isFinite(totalPrice) && totalPrice > 0;
+          const roomsAvailable = hotel.rooms_available;
+          const roomCountText = Number.isInteger(roomsAvailable) && roomsAvailable >= 0
+            ? `${roomsAvailable} rooms reported`
+            : 'Exact room count not provided';
+          const nearby = Array.isArray(hotel.nearby_places) ? hotel.nearby_places : [];
+          const nearbyText = nearby.length
+            ? `Near ${nearby.slice(0, 2).map(place => `${place.name} (${place.distance_km} km)`).join(' · ')}`
+            : (hotel.nearest_place_distance_km !== null && hotel.nearest_place_distance_km !== undefined
+              ? `Closest mapped place: ${hotel.nearest_place_distance_km} km`
+              : 'Nearby distance unavailable; provider coordinates are missing');
+          const searchParams = new URLSearchParams({
+            ss: `${hotel.name || ''}, ${data.destination}`,
+            group_adults: String(data.guests || 1),
+            no_rooms: '1',
+          });
+          if (!data.dates?.assumed && data.dates?.start && data.dates?.end) {
+            searchParams.set('checkin', data.dates.start);
+            searchParams.set('checkout', data.dates.end);
+          }
+          const hotelSearchUrl = `https://www.booking.com/searchresults.html?${searchParams.toString()}`;
+          const latitude = Number(hotel.latitude);
+          const longitude = Number(hotel.longitude);
+          const hasCoordinates = hotel.latitude !== null && hotel.latitude !== undefined
+            && hotel.longitude !== null && hotel.longitude !== undefined
+            && Number.isFinite(latitude) && Math.abs(latitude) <= 90
+            && Number.isFinite(longitude) && Math.abs(longitude) <= 180;
+          const mapUrl = hasCoordinates
+            ? `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=16/${latitude}/${longitude}`
+            : null;
+          const availabilityText = hotel.availability_status === 'offer_found'
+            ? 'Provider returned an offer'
+            : 'Availability not confirmed';
+          return `
+            <article class="bg-white border border-outline-variant rounded-2xl p-4 space-y-3 itinerary-day">
+              <div class="flex justify-between items-start gap-3">
+                <div>
+                  <span class="text-[10px] font-bold text-primary uppercase tracking-wider">${escHtml(hotel.source || data.hotel_search?.source || 'Hotel provider')} offer ${index + 1}</span>
+                  <h4 class="text-sm font-bold text-on-surface flex items-center gap-1.5 mt-0.5">
+                    <span class="material-symbols-outlined text-primary text-base">hotel</span>
+                    ${escHtml(hotel.name || 'Hotel')}
+                  </h4>
+                  <p class="text-[10px] text-on-surface-variant mt-1">${escHtml(hotel.address || '')}</p>
+                </div>
+                ${hotel.rating ? `<span class="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full">★ ${escHtml(hotel.rating)}</span>` : ''}
+              </div>
+              <div class="grid grid-cols-2 gap-2 border-y border-outline-variant py-2">
+                <div>
+                  <p class="text-xs font-extrabold text-on-surface">${hasPrice ? `₹${pricePerNight.toLocaleString('en-IN')}` : 'Price unavailable'}<span class="text-[10px] text-on-surface-variant font-normal">${hasPrice ? '/night' : ''}</span></p>
+                  ${hasTotal ? `<p class="text-[10px] text-on-surface-variant">₹${totalPrice.toLocaleString('en-IN')} for stay</p>` : ''}
+                </div>
+                <div class="text-right">
+                  <p class="text-[10px] font-semibold text-on-surface">${escHtml(roomCountText)}</p>
+                  <p class="text-[10px] text-on-surface-variant">${escHtml(availabilityText)} · Not booked</p>
+                </div>
+              </div>
+              <p class="text-[10px] text-on-surface-variant">${escHtml(nearbyText)}</p>
+              <div class="flex flex-wrap gap-2">
+                <a href="${hotelSearchUrl}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold hover:opacity-90 transition-all">
+                  Compare external options
+                </a>
+                ${mapUrl ? `<a href="${mapUrl}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 rounded-lg border border-outline-variant text-xs font-semibold text-on-surface-variant">Open map</a>` : ''}
+              </div>
+              <p class="text-[10px] text-on-surface-variant">Prices and room inventory may change; external search results may differ. No reservation has been made.</p>
+            </article>
+          `;
+        }).join('');
+        panel.insertAdjacentHTML('beforeend', `
+          <div class="space-y-3 itinerary-day">
+            <h4 class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Live hotel offers</h4>
+            ${hotelCards}
+          </div>
+        `);
+      } else {
+        const hotelStatus = data.provider_status?.hotels?.status || 'unavailable';
+        const hotelNote = data.provider_status?.hotels?.note || 'No live hotel offer was returned for these dates.';
         panel.insertAdjacentHTML('beforeend', `
           <div class="bg-white border border-outline-variant rounded-2xl p-4 space-y-2 itinerary-day">
-            <div class="flex justify-between items-start">
-              <div>
-                <span class="text-[10px] font-bold text-primary uppercase tracking-wider">Live hotel offer</span>
-                <h4 class="text-sm font-bold text-on-surface flex items-center gap-1.5 mt-0.5">
-                  <span class="material-symbols-outlined text-primary text-base">hotel</span>
-                  ${escHtml(hotel.name || 'Hotel')}
-                </h4>
-              </div>
-              ${hotel.rating ? `<span class="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full">★ ${escHtml(hotel.rating)}</span>` : ''}
-            </div>
-            <div class="flex justify-between items-center pt-1 border-t border-outline-variant">
-              <div>
-                <p class="text-xs font-extrabold text-on-surface">₹${Number(hotel.price_per_night_inr).toLocaleString('en-IN')}<span class="text-[10px] text-on-surface-variant font-normal">/night</span></p>
-                <p class="text-[10px] text-on-surface-variant">Provider offer; reconfirm before booking</p>
-              </div>
-              <a href="${hotelBookUrl}" target="_blank" rel="noopener" class="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold hover:opacity-90 transition-all flex items-center gap-1 active:scale-95">
-                <span>Search stays</span>
-                <span class="material-symbols-outlined text-xs">open_in_new</span>
-              </a>
-            </div>
+            <h4 class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Hotel availability</h4>
+            <p class="text-[11px] text-on-surface-variant">${escHtml(hotelNote)} Room counts and prices are not estimated.</p>
+            <span class="inline-flex rounded-full bg-surface-container px-2 py-1 text-[10px] font-semibold text-on-surface-variant">${escHtml(hotelStatus.replaceAll('_', ' '))}</span>
           </div>
         `);
       }
@@ -973,7 +1056,7 @@
       }
     }
 
-    function initLeafletMap(destination, places) {
+    function initLeafletMap(destination, places, hotels) {
       setTimeout(() => {
         const destKey = String(destination || '').trim().toLowerCase();
         const destinationCoords = Object.hasOwn(MAP_COORDS, destKey) ? MAP_COORDS[destKey] : null;
@@ -985,8 +1068,16 @@
           if (!coords.every(Number.isFinite) || Math.abs(coords[0]) > 90 || Math.abs(coords[1]) > 180) return [];
           return [{ name: place.name, category: place.category, coords }];
         });
-        const coords = destinationCoords || placeLocations[0]?.coords;
+        const hotelLocations = (Array.isArray(hotels) ? hotels : []).flatMap(hotel => {
+          if (hotel.latitude === null || hotel.latitude === undefined
+            || hotel.longitude === null || hotel.longitude === undefined) return [];
+          const coords = [Number(hotel.latitude), Number(hotel.longitude)];
+          if (!coords.every(Number.isFinite) || Math.abs(coords[0]) > 90 || Math.abs(coords[1]) > 180) return [];
+          return [{ ...hotel, coords }];
+        });
+        const coords = destinationCoords || placeLocations[0]?.coords || hotelLocations[0]?.coords;
         const mapElement = document.getElementById('trip-map');
+        if (!mapElement) return;
         if (!coords) {
           mapElement.outerHTML = `<p class="rounded-xl bg-surface-container-low px-3 py-4 text-xs text-on-surface-variant">Map coordinates are not available for ${escHtml(destination)}.</p>`;
           return;
@@ -1008,8 +1099,26 @@
             .bindPopup(`<b>${escHtml(destination)}</b><br/>Destination area`));
         }
         placeLocations.forEach(place => {
-          markers.push(L.marker(place.coords).addTo(leafMap)
+          markers.push(L.circleMarker(place.coords, {
+            radius: 6, color: '#2563eb', fillColor: '#2563eb', fillOpacity: 0.9,
+          }).addTo(leafMap)
             .bindPopup(`<b>${escHtml(place.name)}</b><br/>${escHtml(place.category || 'Place listing')}`));
+        });
+        hotelLocations.forEach(hotel => {
+          const price = Number(hotel.price_per_night_inr);
+          const priceText = Number.isFinite(price) && price > 0
+            ? `₹${price.toLocaleString('en-IN')} per night`
+            : 'Price unavailable';
+          const roomText = Number.isInteger(hotel.rooms_available) && hotel.rooms_available >= 0
+            ? `${hotel.rooms_available} rooms reported`
+            : 'Exact room count not provided';
+          const nearbyText = Array.isArray(hotel.nearby_places) && hotel.nearby_places.length
+            ? `<br/>Near ${escHtml(hotel.nearby_places[0].name)} (${escHtml(hotel.nearby_places[0].distance_km)} km)`
+            : '';
+          markers.push(L.circleMarker(hotel.coords, {
+            radius: 8, color: '#a43c12', fillColor: '#ff7f50', fillOpacity: 0.95,
+          }).addTo(leafMap)
+            .bindPopup(`<b>${escHtml(hotel.name || 'Hotel offer')}</b><br/>${escHtml(priceText)}<br/>${escHtml(roomText)}${nearbyText}`));
         });
         if (markers.length) markers[0].openPopup();
         if (markers.length > 1) {

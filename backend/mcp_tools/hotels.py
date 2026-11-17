@@ -39,6 +39,7 @@ async def search_hotels(
         "cheapest_per_night_inr": None,
         "source": "Amadeus",
         "live_inventory": False,
+        "availability_checked": False,
     }
     if not os.getenv("AMADEUS_API_KEY") or not os.getenv("AMADEUS_API_SECRET"):
         return {**unavailable, "status": "not_configured", "note": "Live hotel search is not configured."}
@@ -64,7 +65,12 @@ async def search_hotels(
             if hotels_resp.status_code != 200:
                 return {**unavailable, "status": "provider_error", "note": "Hotel search provider did not return results."}
 
-            hotel_ids = [h["hotelId"] for h in hotels_resp.json().get("data", [])[:10]]
+            hotel_catalog = {
+                hotel["hotelId"]: hotel
+                for hotel in hotels_resp.json().get("data", [])[:10]
+                if hotel.get("hotelId")
+            }
+            hotel_ids = list(hotel_catalog)
             if not hotel_ids:
                 return {**unavailable, "status": "no_results", "note": "No hotels were returned for this location."}
 
@@ -87,6 +93,8 @@ async def search_hotels(
             hotels = []
             for item in offers_resp.json().get("data", []):
                 hotel = item.get("hotel", {})
+                hotel_id = hotel.get("hotelId")
+                catalog_entry = hotel_catalog.get(hotel_id, {})
                 offers = item.get("offers") or []
                 if not offers:
                     continue
@@ -95,15 +103,38 @@ async def search_hotels(
                 price_per_night = total_price / nights
                 if budget_per_night_inr and price_per_night > budget_per_night_inr:
                     continue
+                geo_code = hotel.get("geoCode") or catalog_entry.get("geoCode") or {}
+                latitude = hotel.get("latitude", geo_code.get("latitude"))
+                longitude = hotel.get("longitude", geo_code.get("longitude"))
+                try:
+                    latitude = float(latitude)
+                    longitude = float(longitude)
+                except (TypeError, ValueError):
+                    latitude = longitude = None
+                if (
+                    latitude is None
+                    or longitude is None
+                    or not (-90 <= latitude <= 90)
+                    or not (-180 <= longitude <= 180)
+                ):
+                    latitude = longitude = None
                 hotels.append({
-                    "name": hotel.get("name", "Unknown Hotel"),
+                    "hotel_id": hotel_id,
+                    "offer_id": offer.get("id"),
+                    "name": hotel.get("name") or catalog_entry.get("name", "Unknown Hotel"),
                     "rating": hotel.get("rating"),
                     "address": hotel.get("address", {}).get("lines", [""])[0],
+                    "latitude": latitude,
+                    "longitude": longitude,
                     "price_per_night_inr": round(price_per_night, 2),
                     "total_inr": total_price,
                     "room_type": offer.get("room", {}).get("typeEstimated", {}).get("category", "STANDARD"),
                     "amenities": hotel.get("amenities", [])[:5],
                     "currency": offer.get("price", {}).get("currency", "INR"),
+                    "availability_status": "offer_found",
+                    "rooms_available": None,
+                    "room_availability_note": "The provider returned an offer but does not provide an exact remaining-room count.",
+                    "booking_status": "not_booked",
                 })
 
             is_sandbox = "test.api.amadeus.com" in AMADEUS_BASE_URL
@@ -116,6 +147,7 @@ async def search_hotels(
                 "status": "sandbox" if is_sandbox else ("live" if hotels else "no_results"),
                 "source": "Amadeus",
                 "live_inventory": not is_sandbox and bool(hotels),
+                "availability_checked": not is_sandbox,
                 "checked_at": datetime.now(timezone.utc).isoformat(),
                 "note": "Sandbox results are test data and are not bookable." if is_sandbox else None,
             }

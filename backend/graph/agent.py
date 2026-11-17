@@ -7,6 +7,7 @@ import os
 import json
 import re
 import asyncio
+import logging
 from datetime import date
 from typing import TypedDict, Optional, List
 
@@ -14,6 +15,8 @@ from langgraph.graph import StateGraph, END
 
 from rag.knowledge_base import get_knowledge_retriever
 from mcp_tools.itinerary import build_itinerary
+
+logger = logging.getLogger(__name__)
 
 # ── Configure Gemini SDK ──────────────────────────────────────────────────────
 _genai_client = None
@@ -29,8 +32,19 @@ except Exception:
     _genai_client = None
     _USE_NEW_SDK = False
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-GEMINI_FALLBACK = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash-lite")
+FREE_TIER_GEMINI_MODELS = {"gemini-4-hydrogen", "gemini-3.8-flash"}
+
+
+def _free_tier_model(env_name: str, default: str) -> str:
+    model = os.getenv(env_name, default).strip()
+    if model not in FREE_TIER_GEMINI_MODELS:
+        logger.warning("%s is not on the free-tier model allowlist; using %s", env_name, default)
+        return default
+    return model
+
+
+GEMINI_MODEL = _free_tier_model("GEMINI_MODEL", "gemini-4-hydrogen")
+GEMINI_FALLBACK = _free_tier_model("GEMINI_FALLBACK_MODEL", "gemini-3.8-flash")
 
 # ── RAG Retriever ──────────────────────────────────────────────────────────────
 _retriever = get_knowledge_retriever()
@@ -46,6 +60,7 @@ class TravelAgentState(TypedDict):
     itinerary_json: Optional[dict]
     tool_status: List[str]
     error: Optional[str]
+    ai_data_consent: bool
 
 
 def _fmt(val) -> str:
@@ -58,24 +73,48 @@ def _fmt(val) -> str:
         return str(val)
 
 
+def _redact_direct_contact_details(text: str) -> str:
+    """Remove common email/phone patterns while preserving ISO travel dates."""
+    dates = []
+
+    def preserve_date(match):
+        token = f"__TRAVEL_DATE_{len(dates)}__"
+        dates.append((token, match.group(0)))
+        return token
+
+    text = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", preserve_date, text)
+    text = re.sub(
+        r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+        "[email redacted]",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"(?<![\w])(?:\+\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{4}(?![\w])",
+        "[phone number redacted]",
+        text,
+    )
+    for token, value in dates:
+        text = text.replace(token, value)
+    return text
+
+
 # ── Gemini Helper ──────────────────────────────────────────────────────────────
 def _call_gemini(prompt: str) -> str:
-    """Call Gemini API with automatic fallback to cheaper models on quota errors."""
+    """Call only free-tier models, trying the fallback after a model/API failure."""
     if not _genai_client:
         return ""
-    for model in [GEMINI_MODEL, GEMINI_FALLBACK]:
+    for model in dict.fromkeys((GEMINI_MODEL, GEMINI_FALLBACK)):
         try:
             response = _genai_client.models.generate_content(
                 model=model,
                 contents=prompt,
             )
-            return response.text or ""
-        except Exception as e:
-            err = str(e)
-            if "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
-                continue  # Try next model
-            raise RuntimeError(f"Gemini API ({model}): {e}")
-    return ""  # All models exhausted
+            if response.text:
+                return response.text
+        except Exception as error:
+            logger.warning("Gemini call failed for %s (%s)", model, type(error).__name__)
+    return ""
 
 
 # ── Node 1: RAG Retrieval ──────────────────────────────────────────────────────
@@ -289,7 +328,7 @@ async def intent_parser_node(state: TravelAgentState) -> dict:
     """Parse user message into structured travel intent using Gemini or Smart Regex."""
     prompt = f"""Parse this travel request into JSON. Respond with ONLY valid JSON, nothing else.
 
-User message: "{state['user_message']}"
+User message: "{_redact_direct_contact_details(state['user_message'])}"
 
 Return this exact JSON structure:
 {{
@@ -309,20 +348,21 @@ Return this exact JSON structure:
 }}"""
 
     gemini_intent = None
-    try:
-        text = await asyncio.to_thread(_call_gemini, prompt)
-        if text:
-            text = re.sub(r"```(?:json)?\s*|\s*```", "", text).strip()
-            match = re.search(r'\{.*\}', text, re.DOTALL)
-            if match:
-                text = match.group(0)
-            parsed = json.loads(text)
-            # Validate Gemini didn't return garbage
-            dest = parsed.get('destination', '')
-            if dest and str(dest).lower() not in ['null', 'unknown', '', 'your destination', 'none']:
-                gemini_intent = parsed
-    except Exception:
-        pass
+    if state.get("ai_data_consent"):
+        try:
+            text = await asyncio.to_thread(_call_gemini, prompt)
+            if text:
+                text = re.sub(r"```(?:json)?\s*|\s*```", "", text).strip()
+                match = re.search(r'\{.*\}', text, re.DOTALL)
+                if match:
+                    text = match.group(0)
+                parsed = json.loads(text)
+                # Validate Gemini didn't return garbage
+                dest = parsed.get('destination', '')
+                if dest and str(dest).lower() not in ['null', 'unknown', '', 'your destination', 'none']:
+                    gemini_intent = parsed
+        except Exception as error:
+            logger.warning("Gemini intent parsing failed (%s); using local parser", type(error).__name__)
 
     # Always run smart regex too — use it if Gemini failed or gave bad destination
     regex_intent = _smart_parse_intent(state["user_message"])
@@ -454,7 +494,8 @@ async def llm_synthesis_node(state: TravelAgentState) -> dict:
     destination = intent.get("destination", "your destination")
     days = intent.get("days", 5)
 
-    if not intent.get("destination"):
+    is_general_question = bool(intent.get("is_general_question"))
+    if not intent.get("destination") and not is_general_question:
         return {
             "llm_response": "Tell me which destination you want to visit, and I can prepare a trip outline with the live data currently available.",
             "tool_status": state["tool_status"],
@@ -472,9 +513,22 @@ async def llm_synthesis_node(state: TravelAgentState) -> dict:
     budget_bd = tool_data.get("budget_breakdown", {})
     est_cost = tool_data.get("estimated_cost_inr")
 
-    prompt = f"""You are Roam AI, an advanced multi-modal travel concierge.
+    safe_user_message = _redact_direct_contact_details(state["user_message"])
+    if is_general_question:
+        prompt = f"""You are Roam AI, a travel information assistant.
 
-User request: "{state['user_message']}"
+User question: "{safe_user_message}"
+
+CURATED DESTINATION KNOWLEDGE (may be outdated):
+{rag_context[:1200]}
+
+Use only this context for destination-specific claims. Do not present curated information as live or verified. Do not invent current prices, schedules, availability, weather, or opening hours. If the context does not answer the question, say what information is missing.
+
+Answer concisely."""
+    else:
+        prompt = f"""You are Roam AI, an advanced multi-modal travel concierge.
+
+User request: "{safe_user_message}"
 
 DESTINATION KNOWLEDGE:
 {rag_context[:1200]}
@@ -504,17 +558,33 @@ Only describe details supported by the provider data above. Distinguish live quo
 
 Write a concise response covering available route, accommodation, place, weather, and safety information. Use emojis naturally."""
 
-    try:
-        text = await asyncio.to_thread(_call_gemini, prompt)
-        if text and len(text.strip()) > 50:
-            return {
-                "llm_response": text,
-                "tool_status": state["tool_status"] + ["✨ Generated AI itinerary"],
-            }
-    except Exception:
-        pass
+    if state.get("ai_data_consent") and _genai_client:
+        try:
+            text = await asyncio.to_thread(_call_gemini, prompt)
+            if text and len(text.strip()) > 50:
+                return {
+                    "llm_response": text,
+                    "tool_status": state["tool_status"] + ["✨ Generated response with Gemini"],
+                }
+        except Exception as error:
+            logger.warning("Gemini response synthesis failed (%s); using local planner", type(error).__name__)
 
     # ── Advanced Smart Concierge Synthesizer ──────────────────────────────────
+    fallback_status = list(state["tool_status"])
+    if state.get("ai_data_consent") and _genai_client:
+        fallback_status.append("⚠️ Gemini did not return a usable response; the local planner was used.")
+    elif state.get("ai_data_consent"):
+        fallback_status.append("⚠️ Gemini API key is not configured; the local planner was used.")
+
+    if is_general_question:
+        return {
+            "llm_response": (
+                "I couldn't answer this general question with the local trip planner. "
+                "You can opt in to Gemini for a response, or ask me to build a trip outline."
+            ),
+            "tool_status": fallback_status,
+        }
+
     response_parts = [
         f"### {days}-Day Trip Outline: {destination}\n",
         "Provider coverage is shown below; this outline does not book travel or guarantee availability.\n",
@@ -617,7 +687,7 @@ Write a concise response covering available route, accommodation, place, weather
 
     return {
         "llm_response": "\n".join(response_parts),
-        "tool_status": state["tool_status"] + ["✅ Multi-modal travel plan ready"],
+        "tool_status": fallback_status + ["✅ Multi-modal travel plan ready"],
     }
 
 
@@ -649,9 +719,17 @@ def get_agent():
     return _agent
 
 
-async def run_agent(user_message: str) -> dict:
+async def run_agent(user_message: str, ai_data_consent: bool = False) -> dict:
     """Run the full multi-modal travel agent pipeline."""
     agent = get_agent()
+    if ai_data_consent:
+        initial_status = (
+            ["🔐 Google Gemini free-tier use approved for this request; email and phone patterns are redacted."]
+        )
+        if not _genai_client:
+            initial_status.append("⚠️ Gemini API key is not configured; local planning will be used.")
+    else:
+        initial_status = ["ℹ️ Gemini was not used because data-sharing consent was not provided."]
     initial_state: TravelAgentState = {
         "user_message": user_message,
         "rag_context": "",
@@ -659,8 +737,9 @@ async def run_agent(user_message: str) -> dict:
         "tool_results": {},
         "llm_response": "",
         "itinerary_json": None,
-        "tool_status": [],
+        "tool_status": initial_status,
         "error": None,
+        "ai_data_consent": ai_data_consent,
     }
     final_state = await agent.ainvoke(initial_state)
     return {
