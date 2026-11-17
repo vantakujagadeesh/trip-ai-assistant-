@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Roam | Account</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: "#f8f9fa",
+            primary: "#a43c12",
+            "on-surface": "#191c1d",
+            "on-surface-variant": "#57423b",
+            outline: "#8b7169",
+            "outline-variant": "#dec0b6",
+          },
+        },
+      },
+    };
+  </script>
+  <link rel="stylesheet" href="styles.css"/>
+</head>
+<body class="min-h-screen bg-surface flex items-center justify-center p-4">
+  <main class="w-full max-w-md rounded-2xl border border-outline-variant bg-white p-8 shadow-xl">
+    <a href="index.html" class="text-2xl font-extrabold text-primary">Roam</a>
+    <h1 id="form-title" class="mt-6 text-2xl font-bold text-on-surface">Sign in</h1>
+    <p class="mt-2 text-sm text-on-surface-variant">Sign in to save trips and track booking requests across devices.</p>
+
+    <form id="account-form" class="mt-6 space-y-4">
+      <label class="block text-sm font-medium text-on-surface" for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="email" required maxlength="320"
+        class="w-full rounded-xl border border-outline-variant px-4 py-3 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"/>
+      <label class="block text-sm font-medium text-on-surface" for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="128"
+        class="w-full rounded-xl border border-outline-variant px-4 py-3 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"/>
+      <p class="text-xs text-on-surface-variant">Use at least 12 characters.</p>
+      <button id="submit-button" type="submit"
+        class="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white hover:opacity-90 disabled:opacity-60">
+        Sign in
+      </button>
+    </form>
+
+    <p id="account-status" role="status" aria-live="polite" class="mt-4 min-h-5 text-sm text-on-surface-variant"></p>
+    <button id="mode-toggle" type="button" class="mt-2 text-sm font-semibold text-primary hover:underline">
+      Create an account
+    </button>
+    <a href="index.html" class="mt-8 block text-sm text-on-surface-variant hover:underline">Back to Roam</a>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="app-auth.js"></script>
+  <script src="account.js"></script>
+</body>
+</html>

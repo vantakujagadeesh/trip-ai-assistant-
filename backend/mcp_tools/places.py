@@ -1,11 +1,9 @@
-"""
-MCP Tool: Places & Culinary Dining Search
-Provides real-world attractions, local sights, and 3-meal dining recommendations (Breakfast, Lunch, Dinner)
-for 25+ global destinations with OpenTripMap live API + dynamic fallback.
-"""
+"""Place catalog lookup and explicitly labeled curated dining suggestions."""
 import os
 import httpx
+from datetime import datetime, timezone
 from typing import Optional, Dict, List, Any
+from mcp_tools.location import resolve_location
 
 OPENTRIPMAP_BASE = "https://api.opentripmap.com/0.1/en/places"
 
@@ -356,23 +354,14 @@ async def get_places(
 ) -> dict:
     """Get top places/attractions for a destination."""
     loc_key = location.lower().strip()
-
-    # Match database or fuzzy match
     city_data = _find_city_data(loc_key)
-
-    if city_data:
-        places = city_data.get("attractions", [])
-        return {
-            "location": location.title(),
-            "category": category,
-            "places": places[:limit],
-            "count": len(places[:limit]),
-        }
-
-    # OpenTripMap API call or Dynamic City Generator
     api_key = os.getenv("OPENTRIPMAP_API_KEY", "")
-    if api_key and api_key != "your_opentripmap_key_here":
-        coords = CITY_COORDS.get(loc_key)
+    if category != "restaurants" and api_key and api_key != "your_opentripmap_key_here":
+        resolved = await resolve_location(location)
+        coords = (
+            (resolved["latitude"], resolved["longitude"])
+            if resolved else CITY_COORDS.get(loc_key)
+        )
         if coords:
             lat, lon = coords
             try:
@@ -381,26 +370,67 @@ async def get_places(
                         f"{OPENTRIPMAP_BASE}/radius",
                         params={
                             "radius": 10000, "lon": lon, "lat": lat,
-                            "kinds": "interesting_places", "rate": "3",
+                            "kinds": "interesting_places", "rate": "2",
                             "format": "json", "limit": limit, "apikey": api_key,
                         },
                     )
-                    if resp.status_code == 200:
-                        items = resp.json()
-                        places = [
-                            {
-                                "name": item.get("name", "Attraction"),
-                                "description": item.get("kinds", "").replace(",", ", "),
-                                "rating": 4.5, "category": category
-                            } for item in items if item.get("name")
-                        ]
-                        if places:
-                            return {"location": location.title(), "category": category, "places": places, "count": len(places)}
-            except Exception:
+                    resp.raise_for_status()
+                    items = resp.json()
+                    places = [
+                        {
+                            "name": item["name"],
+                            "description": item.get("kinds", "").replace(",", ", "),
+                            "category": category,
+                            "latitude": (item.get("point") or {}).get("lat"),
+                            "longitude": (item.get("point") or {}).get("lon"),
+                            "source": "OpenTripMap",
+                            "availability_checked": False,
+                        }
+                        for item in items if item.get("name")
+                    ]
+                    if places:
+                        return {
+                            "location": location.title(),
+                            "category": category,
+                            "places": places[:limit],
+                            "count": len(places[:limit]),
+                            "status": "live_catalog",
+                            "source": "OpenTripMap",
+                            "checked_at": datetime.now(timezone.utc).isoformat(),
+                            "note": "Catalog listings are not live opening-hours or entry-availability checks.",
+                        }
+            except (httpx.HTTPError, ValueError):
                 pass
 
-    # Dynamic Generator for ANY city worldwide
-    return _generate_dynamic_city_places(location, category, limit)
+    if city_data and category != "restaurants":
+        places = [
+            {key: value for key, value in item.items() if key != "rating"}
+            | {"source": "curated", "availability_checked": False}
+            for item in city_data.get("attractions", [])
+        ][:limit]
+        return {
+            "location": location.title(),
+            "category": category,
+            "places": places,
+            "count": len(places),
+            "status": "curated",
+            "source": "curated",
+            "note": "Curated suggestions; current opening hours and entry availability are not verified.",
+        }
+
+    return {
+        "location": location.title(),
+        "category": category,
+        "places": [],
+        "count": 0,
+        "status": "not_configured" if category == "restaurants" or not api_key else "unavailable",
+        "source": None,
+        "note": (
+            "Restaurant search and live venue availability are not connected."
+            if category == "restaurants"
+            else "No verified place listings are available for this destination."
+        ),
+    }
 
 
 async def get_3_meals(location: str) -> dict:
@@ -409,23 +439,27 @@ async def get_3_meals(location: str) -> dict:
     city_data = _find_city_data(loc_key)
 
     if city_data and "meals" in city_data:
-        return city_data["meals"]
+        meals = {
+            meal_type: [
+                {**item, "source": "curated", "venue_availability_checked": False, "price_is_estimate": True}
+                for item in options
+            ]
+            for meal_type, options in city_data["meals"].items()
+        }
+        return {
+            **meals,
+            "status": "curated",
+            "source": "curated",
+            "note": "Restaurant hours, table availability, and prices are not verified.",
+        }
 
-    # Dynamic fallback meal recommendations for any location
-    loc_title = location.title()
     return {
-        "breakfast": [
-            {"name": f"Local Heritage Breakfast Café ({loc_title})", "dish": f"Fresh regional breakfast platter & local brew coffee/tea", "price_inr": 200},
-            {"name": f"Central Bakery & Bistro", "dish": f"Freshly baked pastries, eggs & artisanal juice", "price_inr": 300}
-        ],
-        "lunch": [
-            {"name": f"Famous {loc_title} Culinary House", "dish": f"Signature regional lunch thali / main specialty dish", "price_inr": 450},
-            {"name": f"{loc_title} Garden Restaurant", "dish": f"Chef special seasonal lunch platter with Sol Kadi / local drink", "price_inr": 550}
-        ],
-        "dinner": [
-            {"name": f"{loc_title} Sunset Clifftop / Rooftop Dining", "dish": f"Grilled local delicacies, claypot specials & craft drinks", "price_inr": 900},
-            {"name": f"Old Town Gourmet Kitchen", "dish": f"3-course candlelit dinner featuring regional dessert", "price_inr": 1200}
-        ]
+        "breakfast": [],
+        "lunch": [],
+        "dinner": [],
+        "status": "not_configured",
+        "source": None,
+        "note": "Restaurant search is not connected; no venues or prices are being invented.",
     }
 
 
@@ -437,21 +471,3 @@ def _find_city_data(loc_key: str) -> Optional[dict]:
         if key in loc_key or loc_key in key:
             return DESTINATION_DATABASE[key]
     return None
-
-
-def _generate_dynamic_city_places(location: str, category: str, limit: int) -> dict:
-    """Generate authentic attraction recommendations for any city worldwide."""
-    loc_t = location.title()
-    places = [
-        {"name": f"{loc_t} Old Town & Heritage Quarter", "description": f"Historic center featuring traditional architecture, markets & cobblestone streets", "rating": 4.7, "category": "heritage"},
-        {"name": f"{loc_t} Central Botanical Gardens & Park", "description": f"Lush green sanctuary featuring ancient trees, fountains and walking trails", "rating": 4.6, "category": "nature"},
-        {"name": f"{loc_t} Panoramic Clifftop Viewpoint", "description": f"Scenic hilltop offering 360-degree views of the city skyline and landscape", "rating": 4.8, "category": "viewpoint"},
-        {"name": f"{loc_t} Cultural History Museum & Art Gallery", "description": f"Exhibits highlighting royal artifacts, regional art and ancient history", "rating": 4.5, "category": "museum"},
-        {"name": f"{loc_t} Famous Night Market & Shopping Arcade", "description": f"Bustling evening bazaar for local handicrafts, spices and street food", "rating": 4.4, "category": "shopping"},
-    ]
-    return {
-        "location": loc_t,
-        "category": category,
-        "places": places[:limit],
-        "count": len(places[:limit]),
-    }

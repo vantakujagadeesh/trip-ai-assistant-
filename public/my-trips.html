@@ -45,8 +45,11 @@
         <a class="font-medium text-on-surface-variant hover:text-primary transition-colors text-sm" href="discover.html">Find a Trip</a>
         <a class="font-semibold text-primary border-b-2 border-primary pb-1 text-sm" href="my-trips.html">My Trips</a>
         <a class="font-medium text-on-surface-variant hover:text-primary transition-colors text-sm" href="plan.html">AI Planner</a>
+        <a id="admin-link" class="hidden font-medium text-on-surface-variant hover:text-primary text-sm" href="admin.html">Manage requests</a>
       </nav>
       <div class="flex items-center gap-4">
+        <a href="account.html?next=my-trips.html" id="account-link" class="text-sm font-semibold text-primary hover:underline">Sign in</a>
+        <button id="signout-button" type="button" class="hidden text-sm font-semibold text-primary hover:underline">Sign out</button>
         <a href="plan.html" class="bg-primary text-white font-semibold text-xs px-4 py-2 rounded-xl hover:bg-opacity-90 transition-all flex items-center gap-1">
           <span class="material-symbols-outlined text-sm">add</span> New Trip
         </a>
@@ -70,7 +73,7 @@
     </div>
 
     <!-- Trips Bento Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="trips-grid">
+    <div class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="trips-grid">
       
       <!-- Static Sample 1 -->
       <div class="trip-card group overflow-hidden bg-surface-container-lowest border border-outline-variant rounded-2xl flex flex-col">
@@ -140,58 +143,53 @@
       </div>
 
     </div>
+
+    <section class="mt-12">
+      <h2 class="text-2xl font-extrabold text-on-surface">Booking requests</h2>
+      <p class="mt-1 text-sm text-on-surface-variant">Requests are not confirmed reservations. Your travel provider or our team must confirm them.</p>
+      <div id="booking-requests" class="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+    </section>
   </main>
 
-  <script>
-    window.onload = () => {
-      loadSavedTrips();
-    };
-
-    function loadSavedTrips() {
-      const grid = document.getElementById('trips-grid');
-      const saved = JSON.parse(localStorage.getItem('roam_saved_trips') || '[]');
-
-      if (saved.length > 0) {
-        saved.forEach(trip => {
-          const card = document.createElement('div');
-          card.className = 'trip-card group overflow-hidden bg-surface-container-lowest border-2 border-primary/30 rounded-2xl flex flex-col shadow-sm';
-          card.innerHTML = `
-            <div class="relative h-48 overflow-hidden bg-gradient-to-r from-orange-500 to-amber-600 flex items-center justify-center text-white">
-              <span class="material-symbols-outlined text-5xl">flight_takeoff</span>
-              <div class="absolute top-4 right-4">
-                <span class="bg-primary text-white text-xs px-3 py-1 rounded-full font-semibold shadow-md">Saved AI Trip</span>
-              </div>
-            </div>
-            <div class="p-5 flex flex-col flex-grow">
-              <div class="flex justify-between items-start mb-2">
-                <h3 class="font-bold text-lg text-on-surface">${escHtml(trip.title)}</h3>
-                <span class="material-symbols-outlined text-primary">bookmark_added</span>
-              </div>
-              <p class="text-xs text-on-surface-variant mb-6 flex items-center gap-1">
-                <span class="material-symbols-outlined text-sm">calendar_today</span>
-                ${trip.days} Days • ${trip.destination} Multi-Modal Trip
-              </p>
-              <div class="mt-auto pt-4 flex justify-between items-center border-t border-outline-variant">
-                <span class="text-xs font-bold text-primary">₹${Number(trip.cost || 0).toLocaleString('en-IN')}</span>
-                <button onclick="openPlanner('Plan a ${trip.days}-day trip to ${trip.destination}')" class="px-4 py-2 bg-primary text-white font-semibold text-xs rounded-xl hover:opacity-90 transition-colors">
-                  Open Planner
-                </button>
-              </div>
-            </div>
-          `;
-          grid.prepend(card);
-        });
-      }
-    }
-
-    function openPlanner(promptText) {
-      localStorage.setItem('roam_active_prompt', promptText);
-      location.href = 'plan.html';
-    }
-
-    function escHtml(str) {
-      return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
-  </script>
+  <div id="booking-modal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+    <form id="booking-form" class="w-full max-w-lg space-y-4 rounded-2xl bg-white p-6 shadow-2xl">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h2 class="text-xl font-bold text-on-surface">Request a booking</h2>
+          <p id="booking-trip-title" class="mt-1 text-sm text-on-surface-variant"></p>
+        </div>
+        <button id="close-booking-modal" type="button" aria-label="Close" class="text-2xl text-on-surface-variant">&times;</button>
+      </div>
+      <p class="text-xs text-on-surface-variant">This sends a request only; it does not reserve travel or charge you.</p>
+      <label class="block text-sm font-medium" for="booking-service">Service</label>
+      <select id="booking-service" required class="w-full rounded-xl border border-outline-variant px-4 py-3 text-sm">
+        <option value="flight">Flight</option><option value="hotel">Hotel</option><option value="train">Train</option>
+        <option value="bus">Bus</option><option value="cab">Cab</option><option value="other">Other</option>
+      </select>
+      <label class="block text-sm font-medium" for="booking-provider">Preferred provider (optional)</label>
+      <input id="booking-provider" maxlength="120" class="w-full rounded-xl border border-outline-variant px-4 py-3 text-sm"/>
+      <label class="block text-sm font-medium" for="booking-date">Travel date (optional)</label>
+      <input id="booking-date" type="date" class="w-full rounded-xl border border-outline-variant px-4 py-3 text-sm"/>
+      <label class="block text-sm font-medium" for="contact-name">Your name</label>
+      <input id="contact-name" required maxlength="120" autocomplete="name" class="w-full rounded-xl border border-outline-variant px-4 py-3 text-sm"/>
+      <label class="block text-sm font-medium" for="contact-phone">Phone (optional)</label>
+      <input id="contact-phone" type="tel" maxlength="30" autocomplete="tel" class="w-full rounded-xl border border-outline-variant px-4 py-3 text-sm"/>
+      <label class="block text-sm font-medium" for="booking-notes">Notes (do not include payment or passport details)</label>
+      <textarea id="booking-notes" maxlength="2000" rows="3" class="w-full rounded-xl border border-outline-variant px-4 py-3 text-sm"></textarea>
+      <p id="booking-form-status" role="status" aria-live="polite" class="text-sm text-on-surface-variant"></p>
+      <button id="booking-submit" type="submit" class="w-full rounded-xl bg-primary px-4 py-3 font-semibold text-white disabled:opacity-60">Send request</button>
+    </form>
+  </div>
+  <div id="page-status" role="status" aria-live="polite" class="fixed bottom-4 left-4 z-40 max-w-md rounded-xl bg-gray-900 px-4 py-3 text-sm text-white shadow-xl"></div>
+  <div id="sign-in-prompt" class="hidden fixed inset-0 z-40 bg-black/40 p-4 flex items-center justify-center">
+    <div class="max-w-md rounded-2xl bg-white p-6 shadow-xl">
+      <h2 class="text-xl font-bold text-on-surface">Sign in to see your trips</h2>
+      <p class="mt-2 text-sm text-on-surface-variant">Saved trips and booking requests are private to your account.</p>
+      <a href="account.html?next=my-trips.html" class="mt-5 inline-block rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-white">Sign in or create account</a>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="app-auth.js"></script>
+  <script src="trips.js"></script>
 </body>
 </html>

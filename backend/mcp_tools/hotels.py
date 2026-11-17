@@ -4,6 +4,7 @@ Uses Amadeus Hotel API (free sandbox tier)
 """
 import os
 import httpx
+from datetime import datetime, timezone
 from typing import Optional
 from mcp_tools.flights import _get_amadeus_token
 
@@ -30,8 +31,27 @@ async def search_hotels(
     Returns:
         dict with hotel offers sorted by price
     """
-    if not os.getenv("AMADEUS_API_KEY") or os.getenv("AMADEUS_API_KEY") == "your_amadeus_api_key_here":
-        return _mock_hotel_data(city_code, check_in, check_out, budget_per_night_inr)
+    unavailable = {
+        "city": city_code,
+        "check_in": check_in,
+        "check_out": check_out,
+        "hotels": [],
+        "cheapest_per_night_inr": None,
+        "source": "Amadeus",
+        "live_inventory": False,
+        "availability_checked": False,
+    }
+    if not os.getenv("AMADEUS_API_KEY") or not os.getenv("AMADEUS_API_SECRET"):
+        return {**unavailable, "status": "not_configured", "note": "Live hotel search is not configured."}
+
+    try:
+        nights = (datetime.strptime(check_out, "%Y-%m-%d") - datetime.strptime(check_in, "%Y-%m-%d")).days
+    except ValueError:
+        return {**unavailable, "status": "invalid_dates", "note": "Hotel dates must use YYYY-MM-DD."}
+    if nights < 1:
+        return {**unavailable, "status": "invalid_dates", "note": "Check-out must be after check-in."}
+    if len(city_code) != 3 or not city_code.isalpha():
+        return {**unavailable, "status": "unsupported_location", "note": "A valid hotel city code is required."}
 
     try:
         token = await _get_amadeus_token()
@@ -43,11 +63,16 @@ async def search_hotels(
                 params={"cityCode": city_code, "radius": 5, "radiusUnit": "KM"},
             )
             if hotels_resp.status_code != 200:
-                return _mock_hotel_data(city_code, check_in, check_out, budget_per_night_inr)
+                return {**unavailable, "status": "provider_error", "note": "Hotel search provider did not return results."}
 
-            hotel_ids = [h["hotelId"] for h in hotels_resp.json().get("data", [])[:10]]
+            hotel_catalog = {
+                hotel["hotelId"]: hotel
+                for hotel in hotels_resp.json().get("data", [])[:10]
+                if hotel.get("hotelId")
+            }
+            hotel_ids = list(hotel_catalog)
             if not hotel_ids:
-                return _mock_hotel_data(city_code, check_in, check_out, budget_per_night_inr)
+                return {**unavailable, "status": "no_results", "note": "No hotels were returned for this location."}
 
             # Step 2: Get offers for those hotels
             offers_resp = await client.get(
@@ -63,73 +88,68 @@ async def search_hotels(
                 },
             )
             if offers_resp.status_code != 200:
-                return _mock_hotel_data(city_code, check_in, check_out, budget_per_night_inr)
+                return {**unavailable, "status": "provider_error", "note": "Hotel availability could not be checked."}
 
             hotels = []
             for item in offers_resp.json().get("data", []):
                 hotel = item.get("hotel", {})
-                offer = item.get("offers", [{}])[0]
-                price_per_night = float(offer.get("price", {}).get("base", 0)) / max(
-                    (
-                        datetime.strptime(check_out, "%Y-%m-%d")
-                        - datetime.strptime(check_in, "%Y-%m-%d")
-                    ).days,
-                    1,
-                )
+                hotel_id = hotel.get("hotelId")
+                catalog_entry = hotel_catalog.get(hotel_id, {})
+                offers = item.get("offers") or []
+                if not offers:
+                    continue
+                offer = offers[0]
+                total_price = float(offer.get("price", {}).get("total", 0))
+                price_per_night = total_price / nights
                 if budget_per_night_inr and price_per_night > budget_per_night_inr:
                     continue
+                geo_code = hotel.get("geoCode") or catalog_entry.get("geoCode") or {}
+                latitude = hotel.get("latitude", geo_code.get("latitude"))
+                longitude = hotel.get("longitude", geo_code.get("longitude"))
+                try:
+                    latitude = float(latitude)
+                    longitude = float(longitude)
+                except (TypeError, ValueError):
+                    latitude = longitude = None
+                if (
+                    latitude is None
+                    or longitude is None
+                    or not (-90 <= latitude <= 90)
+                    or not (-180 <= longitude <= 180)
+                ):
+                    latitude = longitude = None
                 hotels.append({
-                    "name": hotel.get("name", "Unknown Hotel"),
-                    "rating": hotel.get("rating", "N/A"),
+                    "hotel_id": hotel_id,
+                    "offer_id": offer.get("id"),
+                    "name": hotel.get("name") or catalog_entry.get("name", "Unknown Hotel"),
+                    "rating": hotel.get("rating"),
                     "address": hotel.get("address", {}).get("lines", [""])[0],
+                    "latitude": latitude,
+                    "longitude": longitude,
                     "price_per_night_inr": round(price_per_night, 2),
-                    "total_inr": float(offer.get("price", {}).get("total", 0)),
+                    "total_inr": total_price,
                     "room_type": offer.get("room", {}).get("typeEstimated", {}).get("category", "STANDARD"),
                     "amenities": hotel.get("amenities", [])[:5],
+                    "currency": offer.get("price", {}).get("currency", "INR"),
+                    "availability_status": "offer_found",
+                    "rooms_available": None,
+                    "room_availability_note": "The provider returned an offer but does not provide an exact remaining-room count.",
+                    "booking_status": "not_booked",
                 })
 
-            from datetime import datetime
+            is_sandbox = "test.api.amadeus.com" in AMADEUS_BASE_URL
             return {
                 "city": city_code,
                 "check_in": check_in,
                 "check_out": check_out,
                 "hotels": sorted(hotels, key=lambda x: x["price_per_night_inr"]),
                 "cheapest_per_night_inr": min([h["price_per_night_inr"] for h in hotels]) if hotels else None,
+                "status": "sandbox" if is_sandbox else ("live" if hotels else "no_results"),
+                "source": "Amadeus",
+                "live_inventory": not is_sandbox and bool(hotels),
+                "availability_checked": not is_sandbox,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "note": "Sandbox results are test data and are not bookable." if is_sandbox else None,
             }
-    except Exception:
-        return _mock_hotel_data(city_code, check_in, check_out, budget_per_night_inr)
-
-
-def _mock_hotel_data(city: str, check_in: str, check_out: str, budget: Optional[float]) -> dict:
-    city_hotels = {
-        "GOI": [
-            {"name": "Taj Exotica Resort & Spa", "rating": "5", "price_per_night_inr": 12500},
-            {"name": "Alila Diwa Goa", "rating": "5", "price_per_night_inr": 8900},
-            {"name": "Country Inn Goa", "rating": "3", "price_per_night_inr": 3200},
-        ],
-        "DEL": [
-            {"name": "The Imperial New Delhi", "rating": "5", "price_per_night_inr": 18000},
-            {"name": "Connaught Hotel", "rating": "3", "price_per_night_inr": 4500},
-        ],
-        "PAR": [
-            {"name": "Hotel Le Marais", "rating": "4", "price_per_night_inr": 11000},
-            {"name": "Hôtel de Crillon", "rating": "5", "price_per_night_inr": 42000},
-        ],
-    }
-    hotels_raw = city_hotels.get(city, [
-        {"name": f"{city} Grand Hotel", "rating": "4", "price_per_night_inr": 5000},
-        {"name": f"{city} Budget Inn", "rating": "3", "price_per_night_inr": 2500},
-    ])
-    hotels = [
-        {**h, "room_type": "STANDARD", "amenities": ["WiFi", "Pool", "Breakfast"],
-         "total_inr": h["price_per_night_inr"] * 5}
-        for h in hotels_raw if not budget or h["price_per_night_inr"] <= budget
-    ]
-    return {
-        "city": city,
-        "check_in": check_in,
-        "check_out": check_out,
-        "hotels": hotels,
-        "cheapest_per_night_inr": min([h["price_per_night_inr"] for h in hotels]) if hotels else None,
-        "note": "Demo data — add Amadeus API key for live prices",
-    }
+    except (httpx.HTTPError, ValueError, KeyError):
+        return {**unavailable, "status": "provider_error", "note": "Hotel availability could not be checked."}

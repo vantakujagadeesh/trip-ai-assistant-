@@ -7,10 +7,14 @@ MCP Tool: Live Weather + Road Conditions
 - Road condition analysis: highway alerts, blockage risk, fog/rain hazards, mountain warnings
 - Smart travel advisories: best departure time, best travel window, packing list
 """
+from __future__ import annotations
+
 import httpx
 import asyncio
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
+
+from mcp_tools.location import resolve_location
 
 
 # ── City Coordinates (lat, lon) ────────────────────────────────────────────────
@@ -138,20 +142,38 @@ async def get_live_conditions(
         - best_travel_window: optimal departure time
     """
     dest_key = destination.lower().strip()
-    coords = _get_coords(dest_key)
+    resolved = await resolve_location(destination)
+    coords = (
+        (resolved["latitude"], resolved["longitude"])
+        if resolved else _get_coords(dest_key)
+    )
 
     if not coords:
         # Return minimal data with no-coord fallback
         return {
             "destination": destination, "origin": origin,
+            "status": "location_not_found",
+            "source": "Open-Meteo",
             "current_weather": {},
             "hourly_forecast": [],
             "daily_forecast": [],
             "air_quality": {},
-            "road_conditions": {"risk_level": "UNKNOWN", "alerts": [], "conditions": []},
+            "road_conditions": {
+                "status": "unavailable",
+                "risk_level": "UNKNOWN",
+                "alerts": [],
+                "conditions": [],
+                "traffic_data_connected": False,
+            },
             "travel_advisories": [],
             "best_travel_window": {},
-            "timestamp": datetime.now().isoformat(),
+            "data_sources": {
+                "weather": "location_not_found",
+                "air_quality": "location_not_found",
+                "traffic": "not_connected",
+            },
+            "note": "Current weather and forecast data could not be resolved for this location.",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     lat, lon = coords
@@ -170,14 +192,26 @@ async def get_live_conditions(
     aq = results[2] if not isinstance(results[2], Exception) else {}
 
     # Road condition analysis
-    road = _get_road_conditions(origin_key, dest_key, current_hourly)
+    road = (
+        _get_road_conditions(origin_key, dest_key, current_hourly)
+        if current_hourly.get("current") else {
+            "status": "unavailable",
+            "risk_level": "UNKNOWN",
+            "alerts": [],
+            "conditions": [],
+            "traffic_data_connected": False,
+            "note": "No current weather data is available to assess weather-related driving risk.",
+        }
+    )
 
     # Smart combined advisories
-    advisories = _generate_advisories(current_hourly, daily, road)
+    advisories = _generate_advisories(current_hourly, road)
 
     return {
         "destination": destination,
         "origin": origin,
+        "status": current_hourly.get("status", "unavailable"),
+        "source": "Open-Meteo",
         "current_weather": current_hourly.get("current", {}),
         "hourly_forecast": current_hourly.get("hourly", [])[:12],
         "daily_forecast": daily.get("forecast", []),
@@ -185,7 +219,16 @@ async def get_live_conditions(
         "road_conditions": road,
         "travel_advisories": advisories,
         "best_travel_window": _best_travel_window(current_hourly.get("hourly", [])),
-        "timestamp": datetime.now().isoformat(),
+        "data_sources": {
+            "weather": current_hourly.get("status", "unavailable"),
+            "forecast": daily.get("status", "unavailable"),
+            "air_quality": aq.get("status", "unavailable"),
+            "traffic": "not_connected",
+        },
+        "note": (
+            "Live route traffic and road closures are not connected."
+        ),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -204,23 +247,22 @@ async def _fetch_current_and_hourly(lat: float, lon: float) -> dict:
                     "forecast_days": 2,
                 }
             )
-            if resp.status_code != 200:
-                return {}
+            resp.raise_for_status()
 
             data = resp.json()
             cr = data.get("current", {})
             hr = data.get("hourly", {})
 
-            wc = cr.get("weathercode", 0)
-            wi = WMO_CODES.get(wc, ("Variable", "🌡️", "outdoor"))
+            wc = cr.get("weather_code", cr.get("weathercode"))
+            wi = WMO_CODES.get(wc, ("Unavailable", "", "unknown"))
 
             current = {
                 "temp_c": cr.get("temperature_2m"),
                 "feels_like_c": cr.get("apparent_temperature"),
                 "humidity_pct": cr.get("relative_humidity_2m"),
                 "wind_kmh": cr.get("wind_speed_10m"),
-                "wind_direction": _wind_dir(cr.get("wind_direction_10m", 0)),
-                "precipitation_mm": cr.get("precipitation", 0),
+                "wind_direction": _wind_dir(cr.get("wind_direction_10m")),
+                "precipitation_mm": cr.get("precipitation"),
                 "uv_index": cr.get("uv_index"),
                 "pressure_hpa": cr.get("surface_pressure"),
                 "condition": wi[0],
@@ -232,25 +274,25 @@ async def _fetch_current_and_hourly(lat: float, lon: float) -> dict:
             times = hr.get("time", [])
             hourly = []
             for i, t in enumerate(times[:24]):
-                hwc = hr.get("weathercode", [0] * 24)[i]
-                hwi = WMO_CODES.get(hwc, ("Variable", "🌡️", "outdoor"))
-                vis_raw = hr.get("visibility", [10000] * 24)[i]
+                hwc = _at(hr.get("weather_code") or hr.get("weathercode"), i)
+                hwi = WMO_CODES.get(hwc, ("Unavailable", "", "unknown"))
+                vis_raw = _at(hr.get("visibility"), i)
                 hourly.append({
                     "time": t,
                     "hour": t[11:16] if len(t) > 10 else t,
-                    "temp_c": hr.get("temperature_2m", [25] * 24)[i],
-                    "feels_like_c": hr.get("apparent_temperature", [25] * 24)[i],
-                    "rain_prob": hr.get("precipitation_probability", [0] * 24)[i],
-                    "wind_kmh": hr.get("wind_speed_10m", [10] * 24)[i],
-                    "visibility_km": round((vis_raw or 10000) / 1000, 1),
+                    "temp_c": _at(hr.get("temperature_2m"), i),
+                    "feels_like_c": _at(hr.get("apparent_temperature"), i),
+                    "rain_prob": _at(hr.get("precipitation_probability"), i),
+                    "wind_kmh": _at(hr.get("wind_speed_10m"), i),
+                    "visibility_km": round(vis_raw / 1000, 1) if isinstance(vis_raw, (int, float)) else None,
                     "condition": hwi[0],
                     "icon": hwi[1],
                     "weathercode": hwc,
                 })
 
-            return {"current": current, "hourly": hourly}
-    except Exception:
-        return {}
+            return {"status": "live", "source": "Open-Meteo", "current": current, "hourly": hourly}
+    except httpx.HTTPError:
+        return {"status": "provider_error", "current": {}, "hourly": []}
 
 
 async def _fetch_daily(lat: float, lon: float) -> dict:
@@ -264,32 +306,35 @@ async def _fetch_daily(lat: float, lon: float) -> dict:
                     "timezone": "auto",
                 }
             )
-            if resp.status_code != 200:
-                return {}
+            resp.raise_for_status()
             dr = resp.json().get("daily", {})
             forecast = []
             for i, d in enumerate(dr.get("time", [])):
-                wc = dr.get("weathercode", [0])[i]
-                wi = WMO_CODES.get(wc, ("Variable", "🌡️", "outdoor"))
-                rain = dr.get("precipitation_probability_max", [20])[i] or 0
+                wc = _at(dr.get("weather_code") or dr.get("weathercode"), i)
+                wi = WMO_CODES.get(wc, ("Unavailable", "", "unknown"))
+                rain = _at(dr.get("precipitation_probability_max"), i)
+                max_temp = _at(dr.get("temperature_2m_max"), i)
+                min_temp = _at(dr.get("temperature_2m_min"), i)
                 forecast.append({
                     "date": d,
-                    "max_temp_c": dr.get("temperature_2m_max", [30])[i],
-                    "min_temp_c": dr.get("temperature_2m_min", [20])[i],
+                    "max_temp_c": max_temp,
+                    "min_temp_c": min_temp,
                     "rain_probability": rain,
                     "condition": wi[0],
                     "icon": wi[1],
                     "activity_suitability": wi[2],
-                    "uv_max": dr.get("uv_index_max", [5])[i],
-                    "max_wind_kmh": dr.get("wind_speed_10m_max", [15])[i],
-                    "sunrise": (dr.get("sunrise", [""])[i] or "")[-5:],
-                    "sunset": (dr.get("sunset", [""])[i] or "")[-5:],
-                    "is_good_travel_day": rain < 40 and wc < 61,
-                    "travel_tip": _daily_tip(wc, rain),
+                    "uv_max": _at(dr.get("uv_index_max"), i),
+                    "max_wind_kmh": _at(dr.get("wind_speed_10m_max"), i),
+                    "sunrise": (_at(dr.get("sunrise"), i, "") or "")[-5:],
+                    "sunset": (_at(dr.get("sunset"), i, "") or "")[-5:],
+                    "is_good_travel_day": (
+                        isinstance(rain, (int, float)) and rain < 40 and wc is not None and wc < 61
+                    ),
+                    "travel_tip": _daily_tip(wc, rain) if wc is not None and rain is not None else "",
                 })
-            return {"forecast": forecast}
-    except Exception:
-        return {}
+            return {"status": "live" if forecast else "unavailable", "source": "Open-Meteo", "forecast": forecast}
+    except httpx.HTTPError:
+        return {"status": "provider_error", "forecast": []}
 
 
 async def _fetch_air_quality(lat: float, lon: float) -> dict:
@@ -302,11 +347,13 @@ async def _fetch_air_quality(lat: float, lon: float) -> dict:
                     "current": "pm10,pm2_5,european_aqi,us_aqi",
                 }
             )
-            if resp.status_code != 200:
-                return {}
+            resp.raise_for_status()
             c = resp.json().get("current", {})
             us = c.get("us_aqi")
             return {
+                "status": "live" if c else "unavailable",
+                "source": "Open-Meteo",
+                "observed_at": c.get("time"),
                 "pm2_5": c.get("pm2_5"),
                 "pm10": c.get("pm10"),
                 "us_aqi": us,
@@ -314,8 +361,8 @@ async def _fetch_air_quality(lat: float, lon: float) -> dict:
                 "level": _aqi_level(us),
                 "health_advice": _aqi_advice(us),
             }
-    except Exception:
-        return {}
+    except httpx.HTTPError:
+        return {"status": "provider_error"}
 
 
 # ── Road Conditions Analyzer ──────────────────────────────────────────────────
@@ -324,139 +371,84 @@ def _get_road_conditions(origin_key, dest_key, weather_data: dict) -> dict:
     alerts = []
     conditions = []
     detour_advice = []
-    risk_level = "LOW"
-
-    # Find route
-    route_key = None
-    for (o, d) in HIGHWAY_ROUTES:
-        if origin_key and o in (origin_key or "") and d in dest_key:
-            route_key = (o, d)
-            break
-    if not route_key:
-        for (o, d) in HIGHWAY_ROUTES:
-            if d in dest_key:
-                route_key = (o, d)
-                break
-
-    route_info = HIGHWAY_ROUTES.get(route_key, {})
     current = weather_data.get("current", {})
     hourly = weather_data.get("hourly", [])
+    wcode = current.get("weathercode")
+    wind = current.get("wind_kmh")
+    visibility = _at(hourly[0], "visibility_km") if hourly else None
+    risk_level = "UNKNOWN"
 
-    wcode = current.get("weathercode", 0)
-    wind = current.get("wind_kmh") or 10
-    rain_mm = current.get("precipitation_mm") or 0
-    temp = current.get("temp_c") or 25
-    visibility = hourly[0].get("visibility_km", 10) if hourly else 10
+    if current:
+        risk_level = "LOW"
+        if wcode is not None and wcode >= 95:
+            risk_level = "HIGH"
+            alerts.append("Thunderstorm conditions are reported at the destination; avoid exposed outdoor activities.")
+        elif wcode in [63, 65, 80, 81, 82]:
+            risk_level = "HIGH"
+            alerts.append("Heavy rain is reported at the destination; allow for reduced visibility and wet roads.")
+        elif wcode in [51, 53, 55, 61]:
+            risk_level = "MODERATE"
+            alerts.append("Rain is reported at the destination; use caution on wet roads.")
 
-    # ── Weather-based road risk assessment ──
-    if wcode >= 95:
-        risk_level = "CRITICAL"
-        alerts.append("🚨 ACTIVE THUNDERSTORM — Road travel strongly discouraged")
-        alerts.append("⚠️ Risk of flash flooding on low-lying roads & underpasses")
-        detour_advice.append("Stay indoors — delay departure by at least 2–3 hours after storm clears")
+        if isinstance(wind, (int, float)) and wind > 60:
+            risk_level = "HIGH" if risk_level not in ["HIGH"] else risk_level
+            alerts.append(f"Strong winds ({wind:.0f} km/h) are reported at the destination.")
+        if isinstance(visibility, (int, float)) and visibility < 1.5:
+            risk_level = "HIGH" if visibility < 0.5 else "MODERATE"
+            alerts.append(f"Reduced visibility ({visibility:.1f} km) is forecast for the destination.")
 
-    elif wcode in [63, 65, 80, 81, 82]:
-        risk_level = "HIGH"
-        alerts.append("🌧️ Heavy rain — reduced road visibility & hydroplaning risk on highways")
-        alerts.append("⚠️ Possible waterlogging in city underpasses & low-lying roads")
-        if route_info.get("mountain"):
-            alerts.append("🏔️ Mountain/ghat section CLOSED risk — check NHAI/highway authority before leaving")
-            detour_advice.append("Avoid ghat roads during heavy rain; take valley/bypass route if available")
-
-    elif wcode in [51, 53, 55, 61]:
-        risk_level = "MODERATE"
-        alerts.append("🌦️ Moderate rain — reduce highway speed by 20 km/h, use headlights")
-
-    if wind > 60:
-        risk_level = "HIGH" if risk_level not in ["HIGH", "CRITICAL"] else risk_level
-        alerts.append(f"💨 Strong winds ({wind:.0f} km/h) — high-sided vehicles & two-wheelers at risk")
-
-    if visibility < 0.5:
-        risk_level = "HIGH" if risk_level not in ["HIGH", "CRITICAL"] else risk_level
-        alerts.append(f"🌫️ Very low visibility ({visibility:.1f} km) — fog lights mandatory; drive <40 km/h")
-        detour_advice.append("Delay departure until 9–10 AM when fog usually lifts")
-    elif visibility < 1.5:
-        risk_level = "MODERATE" if risk_level == "LOW" else risk_level
-        alerts.append(f"🌫️ Reduced visibility ({visibility:.1f} km) — drive cautiously")
-
-    if temp > 42:
-        conditions.append("🌡️ Extreme heat (>42°C) — carry 2+ litres water; avoid driving 12–4 PM")
-        conditions.append("🚗 Check tyre pressure before highway driving — heat causes blowouts")
-
-    # ── Mountain road specific ──
-    mountain_dest = any(x in dest_key for x in ["manali", "shimla", "leh", "darjeeling", "ooty", "munnar", "coorg", "kodaikanal", "gangtok"])
-    if mountain_dest or route_info.get("mountain"):
-        conditions.append("🏔️ Mountain road — sharp hairpin bends, single-lane sections; use low gear")
-        conditions.append("⛽ Fill fuel at last major town before hills — petrol stations are sparse")
-        conditions.append("📡 Mobile network may be limited — download offline maps (Google Maps/OsmAnd)")
-        if wcode >= 61:
-            alerts.append("🚨 Landslide / mudslide risk on mountain roads in rain — check BRO / NHAI updates")
-            risk_level = "HIGH" if risk_level not in ["CRITICAL"] else risk_level
-
-    # ── Route info block ──
-    if route_info:
-        conditions.append(f"🛣️ Route: {route_info['highways'][0]}")
-        conditions.append(f"📏 {route_info['distance_km']} km — normal travel time: {route_info['normal_duration']}")
-        conditions.append(f"📍 Via: {route_info['via']}")
-        if wcode >= 63 or wind > 50:
-            extra_time = "add 1–2h to your ETA"
-        elif wcode >= 51:
-            extra_time = "add 30–45 min to your ETA"
-        else:
-            extra_time = "normal ETA expected"
-        conditions.append(f"⏱️ Weather impact: {extra_time}")
-
-    # ── Night driving ──
-    now_hour = datetime.now().hour
-    if 21 <= now_hour or now_hour < 5:
-        conditions.append("🌙 Night driving — beware of animals crossing highway; use high beams responsibly")
-        conditions.append("😴 Plan rest stops every 2 hours on long overnight drives")
-
-    # ── If all clear ──
-    if not alerts:
-        conditions.insert(0, "✅ Roads clear — normal driving conditions")
-
-    # ── Always-on safety tips ──
-    conditions.append("📱 Download Google Maps offline for this route before leaving")
-    conditions.append("⛽ Keep fuel above 50% on inter-city highways")
+        conditions.append(
+            "Weather-based destination advisory only. Live route traffic, road closures, and local authority alerts are not connected."
+        )
+        if risk_level == "LOW":
+            conditions.append("No severe weather signal was detected in the current destination data; this does not confirm that roads are clear.")
 
     return {
+        "status": "weather_based" if current else "unavailable",
         "risk_level": risk_level,
-        "risk_color": {"LOW": "green", "MODERATE": "amber", "HIGH": "red", "CRITICAL": "red"}[risk_level],
-        "risk_icon": {"LOW": "✅", "MODERATE": "⚠️", "HIGH": "🔴", "CRITICAL": "🚨"}[risk_level],
+        "risk_color": {"LOW": "green", "MODERATE": "amber", "HIGH": "red", "CRITICAL": "red", "UNKNOWN": "gray"}[risk_level],
+        "risk_icon": {"LOW": "✅", "MODERATE": "⚠️", "HIGH": "🔴", "CRITICAL": "🚨", "UNKNOWN": "ℹ️"}[risk_level],
         "alerts": alerts,
         "conditions": conditions,
         "detour_advice": detour_advice,
-        "route_info": route_info,
-        "best_departure_time": _best_departure(wcode, now_hour),
+        "route_info": None,
+        "best_departure_time": None,
+        "traffic_data_connected": False,
+        "updated_at": current.get("time"),
     }
 
 
 # ── Smart Advisories Builder ──────────────────────────────────────────────────
 
-def _generate_advisories(current_hourly: dict, daily: dict, road: dict) -> list:
+def _generate_advisories(current_hourly: dict, road: dict) -> list:
     advisories = []
     current = current_hourly.get("current", {})
     hourly = current_hourly.get("hourly", [])
-    wcode = current.get("weathercode", 0)
-    temp = current.get("temp_c") or 25
-    uv = current.get("uv_index") or 0
+    wcode = current.get("weathercode")
+    temp = current.get("temp_c")
+    uv = current.get("uv_index")
 
     # Packing advice
     packing = []
-    if wcode >= 51:
+    if wcode is not None and wcode >= 51:
         packing += ["☂️ Compact rain jacket / umbrella", "💧 Waterproof bag cover"]
-    if temp > 35 or uv > 7:
+    if (temp is not None and temp > 35) or (uv is not None and uv > 7):
         packing += ["🧴 Sunscreen SPF 50+", "🕶️ UV-blocking sunglasses", "🎩 Wide-brim hat"]
-    if temp < 15:
+    if temp is not None and temp < 15:
         packing += ["🧥 Warm jacket / thermal layers", "🧤 Gloves"]
-    if uv > 9:
+    if uv is not None and uv > 9:
         packing.append(f"☀️ Extreme UV ({uv:.0f}) — reapply sunscreen every 90 min")
     if packing:
         advisories.append({"type": "packing", "icon": "🎒", "title": "What to Pack", "items": packing})
 
     # Best activity hours
-    good = [h for h in hourly[:12] if (h.get("rain_prob") or 0) < 30 and h.get("weathercode", 99) < 61]
+    good = [
+        h for h in hourly[:12]
+        if isinstance(h.get("rain_prob"), (int, float))
+        and h.get("weathercode") is not None
+        and h["rain_prob"] < 30
+        and h["weathercode"] < 61
+    ]
     if good:
         advisories.append({
             "type": "timing", "icon": "⏰", "title": "Best Activity Window",
@@ -476,31 +468,24 @@ def _generate_advisories(current_hourly: dict, daily: dict, road: dict) -> list:
             "items": road["detour_advice"]
         })
 
-    # Best travel days this week
-    good_days = [d for d in daily.get("forecast", [])[:7] if d.get("is_good_travel_day")]
-    if good_days:
-        advisories.append({
-            "type": "best_days", "icon": "📅", "title": "Best Travel Days This Week",
-            "items": [
-                f"{d['date']}: {d['icon']} {d['condition']} (max {d['max_temp_c']}°C, {d['rain_probability']}% rain)"
-                for d in good_days[:3]
-            ]
-        })
-
     return advisories
 
 
 def _best_travel_window(hourly: list) -> dict:
     if not hourly:
-        return {"start": "Morning", "reason": "Early morning generally clearest"}
+        return {}
     scored = []
     for h in hourly[:12]:
-        rain = h.get("rain_prob") or 50
-        wc = h.get("weathercode") or 3
-        vis = h.get("visibility_km") or 10
-        wind = h.get("wind_kmh") or 20
+        rain = h.get("rain_prob")
+        wc = h.get("weathercode")
+        vis = h.get("visibility_km")
+        wind = h.get("wind_kmh")
+        if not all(isinstance(value, (int, float)) for value in (rain, wc, vis, wind)):
+            continue
         score = (100 - rain) * 0.4 + min(vis, 10) * 3 - max(0, wind - 30) * 0.5 - (wc > 60) * 30
         scored.append((score, h["hour"], h["condition"], h["icon"], rain))
+    if not scored:
+        return {}
     best = max(scored, key=lambda x: x[0])
     return {
         "start": best[1], "condition": best[2], "icon": best[3],
@@ -511,7 +496,9 @@ def _best_travel_window(hourly: list) -> dict:
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _best_departure(wcode: int, now_hour: int) -> str:
+def _best_departure(wcode: int | None, now_hour: int) -> str:
+    if wcode is None:
+        return "Check local traffic and road-authority alerts; live road data is not connected."
     if wcode >= 95:
         return "🚨 Wait for storm to clear — depart 2–3h after storm ends"
     if wcode in [63, 65, 80, 81, 82]:
@@ -544,12 +531,16 @@ def _aqi_advice(us_aqi) -> str:
     return "Poor air quality — wear N95 mask, limit outdoor exposure"
 
 
-def _wind_dir(degrees: float) -> str:
+def _wind_dir(degrees: float | None) -> str:
+    if degrees is None:
+        return "Unknown"
     dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
     return dirs[round(degrees / 45) % 8]
 
 
-def _daily_tip(wcode: int, rain_prob: int) -> str:
+def _daily_tip(wcode: int, rain_prob: int | None) -> str:
+    if rain_prob is None:
+        return "Forecast details are unavailable."
     if wcode >= 95: return "🚨 Thunderstorms — stay indoors, avoid road travel"
     if wcode >= 61 or rain_prob > 70: return "🌧️ Heavy rain — indoor activities; carry waterproof gear"
     if rain_prob > 40: return "🌦️ Chance of rain — carry umbrella; morning outdoor, afternoon indoor"
@@ -558,10 +549,10 @@ def _daily_tip(wcode: int, rain_prob: int) -> str:
 
 
 def _get_coords(city_key: str):
-    coords = CITY_COORDS.get(city_key)
-    if coords:
-        return coords
-    for key, val in CITY_COORDS.items():
-        if city_key in key or key in city_key:
-            return val
-    return None
+    return CITY_COORDS.get(city_key)
+
+
+def _at(values, key_or_index, default=None):
+    if isinstance(key_or_index, str):
+        return values.get(key_or_index, default) if isinstance(values, dict) else default
+    return values[key_or_index] if isinstance(values, list) and key_or_index < len(values) else default

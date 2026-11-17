@@ -5,7 +5,7 @@ Uses Amadeus API (free sandbox tier)
 import os
 import httpx
 from typing import Optional
-from datetime import datetime
+from datetime import date, datetime, timezone
 
 AMADEUS_BASE_URL = os.getenv("AMADEUS_BASE_URL", "https://test.api.amadeus.com")
 _amadeus_token: Optional[str] = None
@@ -58,9 +58,23 @@ async def search_flights(
     Returns:
         dict with flight offers sorted by price
     """
-    # Use mock data when API key is not configured (for demo purposes)
-    if not os.getenv("AMADEUS_API_KEY") or os.getenv("AMADEUS_API_KEY") == "your_amadeus_api_key_here":
-        return _mock_flight_data(origin, destination, departure_date, budget_inr)
+    unavailable = {
+        "route": f"{origin} → {destination}",
+        "date": departure_date,
+        "offers": [],
+        "cheapest_inr": None,
+        "source": "Amadeus",
+        "live_quotes": False,
+        "availability_checked": False,
+    }
+    if not os.getenv("AMADEUS_API_KEY") or not os.getenv("AMADEUS_API_SECRET"):
+        return {**unavailable, "status": "not_configured", "note": "Live flight search is not configured."}
+    try:
+        date.fromisoformat(departure_date)
+    except ValueError:
+        return {**unavailable, "status": "invalid_date", "note": "Departure date must use YYYY-MM-DD."}
+    if any(len(code) != 3 or not code.isalpha() for code in (origin, destination)):
+        return {**unavailable, "status": "unsupported_location", "note": "Valid three-letter airport codes are required."}
 
     try:
         token = await _get_amadeus_token()
@@ -81,8 +95,7 @@ async def search_flights(
                 headers={"Authorization": f"Bearer {token}"},
                 params=params,
             )
-            if resp.status_code != 200:
-                return {"error": f"Flight search failed: {resp.status_code}", "offers": []}
+            resp.raise_for_status()
 
             data = resp.json()
             offers = []
@@ -90,59 +103,37 @@ async def search_flights(
                 price = float(offer["price"]["total"])
                 if budget_inr and price > budget_inr:
                     continue
+                bookable_seats = offer.get("numberOfBookableSeats")
+                if isinstance(bookable_seats, bool) or not isinstance(bookable_seats, int) or bookable_seats < 0:
+                    bookable_seats = None
                 itineraries = offer.get("itineraries", [{}])
                 segments = itineraries[0].get("segments", [{}]) if itineraries else [{}]
                 first_seg = segments[0] if segments else {}
                 last_seg = segments[-1] if segments else {}
                 offers.append({
+                    "offer_id": offer.get("id"),
                     "airline": first_seg.get("carrierCode", "Unknown"),
                     "departure": first_seg.get("departure", {}).get("at", ""),
                     "arrival": last_seg.get("arrival", {}).get("at", ""),
                     "duration": itineraries[0].get("duration", ""),
                     "stops": len(segments) - 1,
                     "price_inr": price,
+                    "bookable_seats": bookable_seats,
+                    "booking_status": "not_booked",
                     "booking_class": offer.get("travelerPricings", [{}])[0].get("fareDetailsBySegment", [{}])[0].get("cabin", "ECONOMY"),
                 })
+            is_sandbox = "test.api.amadeus.com" in AMADEUS_BASE_URL
             return {
                 "route": f"{origin} → {destination}",
                 "date": departure_date,
                 "offers": sorted(offers, key=lambda x: x["price_inr"]),
                 "cheapest_inr": min([o["price_inr"] for o in offers]) if offers else None,
+                "status": "sandbox" if is_sandbox else ("live" if offers else "no_results"),
+                "source": "Amadeus",
+                "live_quotes": not is_sandbox and bool(offers),
+                "availability_checked": not is_sandbox,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "note": "Sandbox offers are test data and are not bookable." if is_sandbox else None,
             }
-    except Exception as e:
-        return _mock_flight_data(origin, destination, departure_date, budget_inr)
-
-
-def _mock_flight_data(origin: str, destination: str, date: str, budget: Optional[float]) -> dict:
-    """Return realistic mock flight data when API is unavailable."""
-    dest_prices = {
-        "GOI": 4500, "DEL": 3800, "BOM": 4200, "BLR": 3500,
-        "MXP": 45000, "CDG": 48000, "NRT": 55000, "HND": 55000,
-    }
-    base_price = dest_prices.get(destination, 6000)
-    return {
-        "route": f"{origin} → {destination}",
-        "date": date,
-        "offers": [
-            {
-                "airline": "IndiGo",
-                "departure": f"{date}T06:30:00",
-                "arrival": f"{date}T08:45:00",
-                "duration": "PT2H15M",
-                "stops": 0,
-                "price_inr": base_price,
-                "booking_class": "ECONOMY",
-            },
-            {
-                "airline": "Air India",
-                "departure": f"{date}T11:00:00",
-                "arrival": f"{date}T13:30:00",
-                "duration": "PT2H30M",
-                "stops": 0,
-                "price_inr": base_price * 1.15,
-                "booking_class": "ECONOMY",
-            },
-        ],
-        "cheapest_inr": base_price,
-        "note": "Demo data — add Amadeus API key for live prices",
-    }
+    except (httpx.HTTPError, ValueError, KeyError):
+        return {**unavailable, "status": "provider_error", "note": "Flight prices could not be checked."}

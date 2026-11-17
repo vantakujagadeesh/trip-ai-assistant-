@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8"/>
   <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-  <title>Roam | Real-Time AI Travel Concierge</title>
-  <meta name="description" content="Plan your perfect trip with Roam AI — Weather-adaptive travel planner with 3 Meals/day, Route Advice, Flights, Trains, Buses, Cabs, Hotels, and Interactive Maps."/>
+  <title>Roam | Trip Planner</title>
+  <meta name="description" content="Create a personalized trip outline with Roam. See live weather and place data when available, and check which travel providers are connected."/>
   <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
   <link rel="stylesheet" href="styles.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
@@ -67,12 +67,18 @@
     ::-webkit-scrollbar { width: 5px; }
     ::-webkit-scrollbar-thumb { background: #dec0b6; border-radius: 10px; }
     .mic-recording { animation: pulseRed 1s infinite alternate; color: #ef4444 !important; }
+    .mobile-tab-active { background: #a43c12; color: white; }
+    @media (max-width: 767px) {
+      body.h-screen { height: 100dvh; }
+      #chat-panel, #itinerary-sidebar { min-height: 0; }
+      #chat-panel.mobile-hidden, #itinerary-sidebar.mobile-hidden { display: none !important; }
+    }
     @keyframes pulseRed {
       from { transform: scale(1); opacity: 1; }
       to { transform: scale(1.2); opacity: 0.7; }
     }
     @media print {
-      header, section, #tool-activity-panel, #itinerary-footer, #toast { display: none !important; }
+      header, #mobile-view-switcher, section, #tool-activity-panel, #itinerary-footer, #toast { display: none !important; }
       aside { width: 100% !important; display: block !important; overflow: visible !important; }
       body { overflow: auto !important; background: white !important; }
       #trip-map { height: 300px !important; }
@@ -95,13 +101,14 @@
         <span>Roam</span>
       </a>
       <div class="h-5 w-px bg-outline-variant mx-2 hidden sm:block"></div>
-      <h1 class="font-semibold text-base text-on-surface truncate hidden sm:block" id="trip-title-header">Real-Time AI Travel Hub</h1>
+      <h1 class="font-semibold text-base text-on-surface truncate hidden sm:block" id="trip-title-header">Trip Planner</h1>
     </div>
     <div class="flex items-center gap-3">
       <nav class="hidden md:flex gap-5 mr-4">
         <a class="text-sm font-medium text-on-surface-variant hover:text-primary transition-colors" href="discover.html">Discover</a>
         <a class="text-sm font-semibold text-primary" href="plan.html">Plan</a>
         <a class="text-sm font-medium text-on-surface-variant hover:text-primary transition-colors" href="my-trips.html">My Trips</a>
+        <a class="text-sm font-medium text-on-surface-variant hover:text-primary transition-colors" href="account.html?next=plan.html">Account</a>
       </nav>
       <button onclick="openEmailModal()" id="email-btn" class="hidden px-3.5 py-1.5 rounded-lg border border-outline text-xs font-medium hover:bg-surface-container transition-all active:scale-95 flex items-center gap-1.5">
         <span class="material-symbols-outlined text-base">mail</span> Email Plan
@@ -109,15 +116,22 @@
       <button onclick="openAlertModal()" id="alert-btn" class="hidden px-3.5 py-1.5 rounded-lg bg-primary-fixed text-primary text-xs font-semibold hover:bg-primary-fixed-dim transition-all active:scale-95 flex items-center gap-1.5">
         <span class="material-symbols-outlined text-base">notifications</span> Price Alert
       </button>
-      <div class="w-8 h-8 rounded-full bg-primary text-white font-bold text-xs flex items-center justify-center">JD</div>
+      <a href="account.html?next=plan.html" class="w-8 h-8 rounded-full bg-primary-fixed text-primary flex items-center justify-center" aria-label="Account">
+        <span class="material-symbols-outlined text-lg">person</span>
+      </a>
     </div>
   </header>
 
+  <nav id="mobile-view-switcher" class="md:hidden fixed top-16 left-0 right-0 z-40 grid grid-cols-2 gap-2 bg-white border-b border-outline-variant px-3 py-2" aria-label="Planner views">
+    <button id="mobile-chat-tab" type="button" class="rounded-lg py-2 text-sm font-semibold mobile-tab-active" aria-pressed="true" onclick="setMobileView('chat')">Chat</button>
+    <button id="mobile-itinerary-tab" type="button" class="rounded-lg py-2 text-sm font-semibold bg-surface-container-low text-on-surface-variant" aria-pressed="false" onclick="setMobileView('itinerary')">Trip outline</button>
+  </nav>
+
   <!-- Main Split Layout -->
-  <main class="flex-1 mt-16 flex overflow-hidden">
+  <main class="flex-1 mt-28 md:mt-16 flex overflow-hidden">
 
     <!-- LEFT: Chat Interface -->
-    <section class="w-full md:w-[50%] lg:w-[52%] flex flex-col bg-surface-container-lowest border-r border-outline-variant">
+    <section id="chat-panel" class="w-full md:w-[50%] lg:w-[52%] flex flex-col bg-surface-container-lowest border-r border-outline-variant">
 
       <!-- Chat Messages -->
       <div class="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-5" id="chat-container">
@@ -129,7 +143,7 @@
           </div>
           <div class="bg-surface-container-low border border-outline-variant p-4 rounded-2xl rounded-tl-none text-sm space-y-3">
             <p class="text-on-surface font-semibold">Hey there! I'm Roam AI 🌍</p>
-            <p class="text-on-surface leading-relaxed">I create <strong>100% custom, weather-adaptive trip plans</strong> with <strong>live weather</strong> (hourly forecast, UV, air quality), <strong>real-time road conditions</strong> (highway status, blockage risk, departure timing), <strong>3 Meals/Day</strong>, and interactive maps!</p>
+            <p class="text-on-surface leading-relaxed">I build a trip outline using live weather and place data when available. Transport, room, and restaurant availability is shown only when a provider can verify it; I do not make bookings.</p>
             <div class="space-y-1.5 pt-1">
               <p class="text-xs font-semibold text-on-surface-variant">Try asking me:</p>
               <div class="flex flex-wrap gap-2">
@@ -147,6 +161,15 @@
 
       <!-- Input Bar -->
       <div class="p-4 bg-white border-t border-outline-variant">
+        <label for="ai-data-consent" class="max-w-3xl mx-auto mb-2 flex items-start gap-2 text-[10px] leading-relaxed text-on-surface-variant">
+          <input id="ai-data-consent" type="checkbox" class="mt-0.5 flex-shrink-0">
+          <span>
+            Optional Gemini AI: when checked, your message, trip details, and relevant provider results are sent to Google.
+            Email and phone patterns are redacted. Google may use free-tier content to improve its products.
+            Don't include names, account, passport, or payment details. If unchecked, Gemini is skipped; connected travel providers may still receive search details.
+            <a href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noopener noreferrer" class="underline">Free-tier details</a>.
+          </span>
+        </label>
         <form id="chat-form" onsubmit="handleSendMessage(event)" class="max-w-3xl mx-auto flex items-center gap-2 bg-surface-container-low border border-outline-variant rounded-2xl p-2 shadow-sm focus-within:ring-2 ring-primary-container transition-all">
           <button type="button" onclick="clearChat()" title="Clear chat" class="p-2 text-on-surface-variant hover:text-primary transition-colors rounded-lg flex-shrink-0">
             <span class="material-symbols-outlined text-lg">refresh</span>
@@ -162,25 +185,25 @@
             <span class="hidden sm:inline">Ask AI</span>
           </button>
         </form>
-        <p class="text-center text-[10px] text-on-surface-variant mt-2">Live Weather ☁️ • Road Conditions 🛣️ • 3 Meals/Day 🍽️ • Voice AI 🎙️ • Interactive Maps 📍</p>
+        <p class="text-center text-[10px] text-on-surface-variant mt-2">Forecasts when available • Provider-backed listings • Interactive Maps 📍</p>
       </div>
     </section>
 
     <!-- RIGHT: Live Itinerary + Interactive Map & 3-Meal Panel -->
-    <aside class="hidden md:flex flex-col w-[50%] lg:w-[48%] bg-surface-container-low overflow-hidden">
+    <aside id="itinerary-sidebar" class="mobile-hidden flex flex-col w-full md:w-[50%] lg:w-[48%] bg-surface-container-low overflow-hidden">
 
       <!-- Panel Header -->
       <div class="p-4 border-b border-outline-variant bg-white/80 backdrop-blur-md sticky top-0 z-10 flex justify-between items-center">
         <h2 class="font-bold text-base text-on-surface flex items-center gap-2">
           <span class="material-symbols-outlined text-primary text-xl">map</span>
-          Real-Time Travel Studio
+          Trip outline
         </h2>
         <span id="panel-status-badge" class="bg-surface-container text-on-surface-variant px-3 py-1 rounded-full text-xs font-medium">Ready</span>
       </div>
 
       <!-- Tool Activity Feed -->
       <div id="tool-activity-panel" class="px-4 py-2 border-b border-outline-variant space-y-2 min-h-[48px] max-h-[110px] overflow-y-auto bg-white/50">
-        <p class="text-xs text-on-surface-variant italic">AI multi-modal tools will search live data & dining here...</p>
+        <p class="text-xs text-on-surface-variant italic">Connected data sources and unavailable providers will be shown here.</p>
       </div>
 
       <!-- Scrollable Itinerary Content -->
@@ -191,25 +214,25 @@
             <span class="material-symbols-outlined text-primary text-3xl">restaurant_menu</span>
           </div>
           <div>
-            <p class="font-bold text-base text-on-surface">Your 3-Meal & Multi-Modal Plan will appear here</p>
-            <p class="text-xs text-on-surface-variant mt-1 max-w-xs">Ask Roam AI to plan a trip to view weather-adaptive schedules, breakfast/lunch/dinner spots, best route recommendations, and interactive maps.</p>
+            <p class="font-bold text-base text-on-surface">Your trip outline will appear here</p>
+            <p class="text-xs text-on-surface-variant mt-1 max-w-xs">Ask Roam to create an itinerary. Live weather and verified provider listings appear when those sources are available.</p>
           </div>
           <div class="grid grid-cols-4 gap-2 w-full max-w-sm pt-4">
             <div class="bg-white rounded-xl p-2.5 border border-outline-variant text-center">
               <span class="material-symbols-outlined text-primary text-lg">alt_route</span>
-              <p class="text-[11px] font-semibold mt-0.5 text-on-surface">Best Route</p>
+                <p class="text-[11px] font-semibold mt-0.5 text-on-surface">Route notes</p>
             </div>
             <div class="bg-white rounded-xl p-2.5 border border-outline-variant text-center">
               <span class="material-symbols-outlined text-primary text-lg">restaurant</span>
-              <p class="text-[11px] font-semibold mt-0.5 text-on-surface">3 Meals/Day</p>
+              <p class="text-[11px] font-semibold mt-0.5 text-on-surface">Meal breaks</p>
             </div>
             <div class="bg-white rounded-xl p-2.5 border border-outline-variant text-center">
               <span class="material-symbols-outlined text-primary text-lg">thunderstorm</span>
-              <p class="text-[11px] font-semibold mt-0.5 text-on-surface">Weather Swap</p>
+              <p class="text-[11px] font-semibold mt-0.5 text-on-surface">Weather</p>
             </div>
             <div class="bg-white rounded-xl p-2.5 border border-outline-variant text-center">
               <span class="material-symbols-outlined text-primary text-lg">pin_drop</span>
-              <p class="text-[11px] font-semibold mt-0.5 text-on-surface">Live Map</p>
+              <p class="text-[11px] font-semibold mt-0.5 text-on-surface">Map</p>
             </div>
           </div>
         </div>
@@ -226,7 +249,7 @@
             <button onclick="window.print()" class="px-3 py-2 rounded-xl border border-outline text-xs font-semibold text-on-surface hover:bg-surface-container transition-all flex items-center gap-1.5" title="Print or Save as PDF">
               <span class="material-symbols-outlined text-base">picture_as_pdf</span> PDF
             </button>
-            <button onclick="saveCurrentTrip()" class="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold hover:opacity-90 active:scale-95 transition-all shadow-sm flex items-center gap-1.5">
+            <button id="save-trip-button" onclick="saveCurrentTrip()" class="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold hover:opacity-90 active:scale-95 transition-all shadow-sm flex items-center gap-1.5">
               <span class="material-symbols-outlined text-base">bookmark</span> Save Trip
             </button>
           </div>
@@ -251,7 +274,7 @@
         <h3 class="font-bold text-lg text-on-surface">📧 Email Full Plan</h3>
         <button onclick="closeModal('email-modal')" class="text-on-surface-variant hover:text-on-surface"><span class="material-symbols-outlined">close</span></button>
       </div>
-      <p class="text-sm text-on-surface-variant">We'll send your complete 3-meal itinerary & route recommendations to your email.</p>
+      <p class="text-sm text-on-surface-variant">We'll send your trip outline and any route details available for this plan.</p>
       <input id="email-input" type="email" placeholder="your@email.com" class="w-full px-4 py-3 rounded-xl border border-outline-variant text-sm focus:ring-2 ring-primary focus:outline-none"/>
       <input id="name-input" type="text" placeholder="Your name" class="w-full px-4 py-3 rounded-xl border border-outline-variant text-sm focus:ring-2 ring-primary focus:outline-none"/>
       <button onclick="submitEmailItinerary()" class="w-full bg-primary text-white py-3 rounded-xl font-semibold text-sm hover:opacity-90 active:scale-98 transition-all" id="email-submit-btn">
@@ -268,7 +291,7 @@
         <h3 class="font-bold text-lg text-on-surface">🔔 Set Fare Alert</h3>
         <button onclick="closeModal('alert-modal')" class="text-on-surface-variant hover:text-on-surface"><span class="material-symbols-outlined">close</span></button>
       </div>
-      <p class="text-sm text-on-surface-variant">Get notified when flight or train fares drop below your target price.</p>
+      <p class="text-sm text-on-surface-variant">Get notified when a supported flight fare drops below your target price.</p>
       <input id="alert-email" type="email" placeholder="your@email.com" class="w-full px-4 py-3 rounded-xl border border-outline-variant text-sm focus:ring-2 ring-primary focus:outline-none"/>
       <input id="alert-price" type="number" placeholder="Target price in ₹ (e.g. 3500)" class="w-full px-4 py-3 rounded-xl border border-outline-variant text-sm focus:ring-2 ring-primary focus:outline-none"/>
       <button onclick="submitPriceAlert()" class="w-full bg-primary text-white py-3 rounded-xl font-semibold text-sm hover:opacity-90 transition-all" id="alert-submit-btn">
@@ -278,11 +301,14 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="app-auth.js"></script>
   <script>
     const API_BASE = ['localhost', '127.0.0.1'].includes(window.location.hostname)
       ? 'http://localhost:8000'
       : '';
     let currentItinerary = null;
+    let currentSavedTripId = null;
     let isLoading = false;
     let leafMap = null;
 
@@ -292,12 +318,48 @@
       "kerala": [10.8505, 76.2711], "rajasthan": [27.0238, 74.2179], "paris": [48.8566, 2.3522],
       "rome": [41.9028, 12.4964], "tokyo": [35.6762, 139.6503], "bali": [-8.3405, 115.0920]
     };
+    const TRANSPORT_BADGE_CLASSES = new Set([
+      'bg-emerald-100 text-emerald-800',
+      'bg-blue-100 text-blue-800',
+      'bg-amber-100 text-amber-800',
+      'bg-purple-100 text-purple-800',
+    ]);
 
-    window.onload = () => {
+    window.onload = async () => {
       const p = localStorage.getItem('roam_active_prompt');
       if (p) {
         document.getElementById('chat-input').value = p;
         localStorage.removeItem('roam_active_prompt');
+      }
+
+      const pendingTrip = sessionStorage.getItem('roam_pending_trip');
+      const openTrip = sessionStorage.getItem('roam_open_trip');
+      if (!pendingTrip && !openTrip) return;
+
+      try {
+        const { supabase, apiFetch } = await window.RoamAuth.initialize();
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        if (!data.session) {
+          window.location.replace('account.html?next=plan.html');
+          return;
+        }
+
+        if (pendingTrip) {
+          const itinerary = JSON.parse(pendingTrip);
+          renderItinerary(itinerary);
+          const savedTrip = await saveItineraryRecord(itinerary, apiFetch);
+          currentSavedTripId = savedTrip.id;
+          sessionStorage.removeItem('roam_pending_trip');
+          showToast('Trip saved to your account.');
+        } else {
+          const trip = JSON.parse(openTrip);
+          renderItinerary(trip.itinerary);
+          currentSavedTripId = trip.id;
+          sessionStorage.removeItem('roam_open_trip');
+        }
+      } catch (error) {
+        showToast(error.message || 'Could not load the saved trip.');
       }
     };
 
@@ -308,6 +370,20 @@
       setTimeout(() => {
         toast.classList.add('opacity-0', 'pointer-events-none', 'translate-y-[-10px]');
       }, 3000);
+    }
+
+    function setMobileView(view) {
+      const showItinerary = view === 'itinerary';
+      document.getElementById('chat-panel').classList.toggle('mobile-hidden', showItinerary);
+      document.getElementById('itinerary-sidebar').classList.toggle('mobile-hidden', !showItinerary);
+      document.getElementById('mobile-chat-tab').classList.toggle('mobile-tab-active', !showItinerary);
+      document.getElementById('mobile-chat-tab').classList.toggle('bg-surface-container-low', showItinerary);
+      document.getElementById('mobile-chat-tab').classList.toggle('text-on-surface-variant', showItinerary);
+      document.getElementById('mobile-itinerary-tab').classList.toggle('mobile-tab-active', showItinerary);
+      document.getElementById('mobile-itinerary-tab').classList.toggle('bg-surface-container-low', !showItinerary);
+      document.getElementById('mobile-itinerary-tab').classList.toggle('text-on-surface-variant', !showItinerary);
+      document.getElementById('mobile-chat-tab').setAttribute('aria-pressed', String(!showItinerary));
+      document.getElementById('mobile-itinerary-tab').setAttribute('aria-pressed', String(showItinerary));
     }
 
     function sendQuickPrompt(text) {
@@ -324,6 +400,7 @@
       const input = document.getElementById('chat-input');
       const text = input.value.trim();
       if (!text) return;
+      const aiDataConsent = document.getElementById('ai-data-consent').checked;
 
       isLoading = true;
       input.value = '';
@@ -340,7 +417,7 @@
         const response = await fetch(`${API_BASE}/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text }),
+          body: JSON.stringify({ message: text, ai_data_consent: aiDataConsent }),
         });
 
         if (!response.ok) throw new Error(`Backend error: ${response.status}`);
@@ -375,13 +452,14 @@
           }
         }
 
-        if (!aiText) updateAIBubble(aiBubbleId, '✅ Custom 3-meal plan ready! Check the right panel →');
+        if (!aiText) updateAIBubble(aiBubbleId, 'The response did not include a message. Check the trip outline for any available results, or try again.');
         updatePanelBadge('Ready ✓', 'bg-green-100 text-green-700');
 
       } catch (err) {
         updateAIBubble(aiBubbleId, `⚠️ ${err.message}`);
         updatePanelBadge('Error', 'bg-red-100 text-red-700');
       } finally {
+        document.getElementById('ai-data-consent').checked = false;
         isLoading = false;
         setLoadingState(false);
         scrollChat();
@@ -426,7 +504,7 @@
     function updateAIBubble(id, text) {
       const bubble = document.querySelector(`#${id} .ai-bubble-content`);
       if (!bubble) return;
-      const formatted = text
+      const formatted = escHtml(text)
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/`([^`]+)`/g, '<code class="bg-amber-100 text-amber-900 px-1 py-0.5 rounded text-xs">$1</code>')
         .replace(/\n/g, '<br/>');
@@ -444,13 +522,13 @@
 
       const div = document.createElement('div');
       div.className = 'tool-pill flex items-center gap-2 text-xs text-on-surface-variant bg-white border border-outline-variant rounded-lg px-3 py-1.5';
-      div.innerHTML = `<span>${message}</span>`;
+      div.textContent = message;
       panel.appendChild(div);
       panel.scrollTop = panel.scrollHeight;
     }
 
     function resetToolActivity() {
-      document.getElementById('tool-activity-panel').innerHTML = '<p class="text-xs text-on-surface-variant italic">Searching live data & 3-meal options...</p>';
+      document.getElementById('tool-activity-panel').innerHTML = '<p class="text-xs text-on-surface-variant italic">Checking connected data sources...</p>';
     }
 
     function updatePanelBadge(text, classes) {
@@ -472,6 +550,7 @@
     // ── Render Multi-Modal Itinerary ──────────────────────────────────────────
     function renderItinerary(data) {
       currentItinerary = data;
+      if (window.innerWidth < 768) setMobileView('itinerary');
       const panel = document.getElementById('itinerary-panel');
       const emptyState = document.getElementById('empty-state');
       const footer = document.getElementById('itinerary-footer');
@@ -484,8 +563,44 @@
 
       if (data.estimated_cost_inr) {
         document.getElementById('cost-display').textContent = `₹${Number(data.estimated_cost_inr).toLocaleString('en-IN')}`;
+      } else {
+        document.getElementById('cost-display').textContent = 'Not available';
       }
       document.getElementById('trip-title-header').textContent = `${data.destination} • ${data.days} Days Plan`;
+
+      const providerLabels = {
+        flights: 'Flights', hotels: 'Hotels', weather: 'Trip forecast', live_conditions: 'Current weather',
+        places: 'Places', restaurants: 'Restaurants', trains: 'Trains', buses: 'Buses',
+        ground_transport: 'Local transport'
+      };
+      const providerStatusLabels = {
+        live: 'Live data', partial: 'Partial forecast', live_catalog: 'Catalog listings',
+        curated: 'Curated suggestions', sandbox: 'Sandbox test data', not_configured: 'Not configured',
+        not_integrated: 'Not connected', unsupported_location: 'Location unsupported',
+        out_of_range: 'Forecast out of range', provider_error: 'Temporarily unavailable',
+        no_results: 'No results', location_not_found: 'Location not found', unavailable: 'Unavailable',
+        invalid_dates: 'Invalid dates', invalid_date: 'Invalid date', past_date: 'Past date'
+      };
+      const providerRows = Object.entries(data.provider_status || {}).map(([key, info]) => {
+        const status = providerStatusLabels[info.status] || info.status || 'Unavailable';
+        return `<div class="flex justify-between gap-3 text-[11px]"><span class="text-on-surface-variant">${escHtml(providerLabels[key] || key)}</span><span class="font-semibold text-on-surface">${escHtml(status)}</span></div>`;
+      }).join('');
+      if (providerRows) {
+        panel.insertAdjacentHTML('beforeend', `
+          <div class="bg-white border border-outline-variant rounded-2xl p-4 space-y-2 itinerary-day">
+            <h4 class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Data availability</h4>
+            ${providerRows}
+            <p class="text-[10px] text-on-surface-variant pt-1">Train, bus, cab, restaurant, and room availability depend on provider connections; this plan does not make bookings.</p>
+          </div>
+        `);
+      }
+      if (data.dates?.assumed) {
+        panel.insertAdjacentHTML('beforeend', `
+          <p class="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-[11px] text-amber-900">
+            No travel date was specified. This outline uses ${escHtml(data.dates.start)} as a placeholder; enter your dates for relevant availability and forecasts.
+          </p>
+        `);
+      }
 
       // ── 0. LIVE WEATHER WIDGET ─────────────────────────────────────────────
       const lc = data.live_current_weather || {};
@@ -503,7 +618,7 @@
           : 'from-sky-500 via-blue-600 to-indigo-700';
 
         const aqBadge = aq.level
-          ? `<span class="text-[10px] font-semibold px-2 py-0.5 rounded-full ${aq.us_aqi <= 50 ? 'bg-green-400/30 text-green-200' : aq.us_aqi <= 100 ? 'bg-yellow-400/30 text-yellow-200' : 'bg-red-400/30 text-red-200'}">${aq.level}</span>`
+          ? `<span class="text-[10px] font-semibold px-2 py-0.5 rounded-full ${aq.us_aqi <= 50 ? 'bg-green-400/30 text-green-200' : aq.us_aqi <= 100 ? 'bg-yellow-400/30 text-yellow-200' : 'bg-red-400/30 text-red-200'}">${escHtml(aq.level)}</span>`
           : '';
 
         const hourlyHtml = hourly.length ? `
@@ -512,10 +627,10 @@
             <div class="flex gap-3 overflow-x-auto pb-1 snap-x">
               ${hourly.slice(0,8).map(h => `
                 <div class="flex-shrink-0 snap-start flex flex-col items-center gap-0.5 bg-white/10 rounded-xl px-3 py-2 min-w-[54px]">
-                  <span class="text-[10px] text-white/70 font-medium">${h.hour}</span>
-                  <span class="text-lg leading-none">${h.icon}</span>
-                  <span class="text-xs font-bold text-white">${h.temp_c}°</span>
-                  <span class="text-[9px] text-blue-200">${h.rain_prob}%🌧</span>
+                  <span class="text-[10px] text-white/70 font-medium">${escHtml(h.hour)}</span>
+                  <span class="text-lg leading-none">${escHtml(h.icon)}</span>
+                  <span class="text-xs font-bold text-white">${escHtml(h.temp_c)}°</span>
+                  <span class="text-[9px] text-blue-200">${escHtml(h.rain_prob)}%🌧</span>
                 </div>
               `).join('')}
             </div>
@@ -530,15 +645,15 @@
                 <div>
                   <p class="text-[11px] text-white/60 font-medium uppercase tracking-wider">Live Weather in ${escHtml(data.destination)}</p>
                   <div class="flex items-end gap-2 mt-1">
-                    <span class="text-5xl font-black leading-none">${lc.temp_c !== undefined ? lc.temp_c + '°' : '--'}</span>
+                    <span class="text-5xl font-black leading-none">${lc.temp_c !== undefined ? escHtml(lc.temp_c) + '°' : '--'}</span>
                     <div class="pb-1">
-                      <p class="text-sm font-semibold">${lc.icon || ''} ${escHtml(lc.condition || '')}</p>
-                      <p class="text-xs text-white/70">Feels like ${lc.feels_like_c !== undefined ? lc.feels_like_c + '°C' : '--'}</p>
+                      <p class="text-sm font-semibold">${escHtml(lc.icon || '')} ${escHtml(lc.condition || '')}</p>
+                      <p class="text-xs text-white/70">Feels like ${lc.feels_like_c !== undefined ? escHtml(lc.feels_like_c) + '°C' : '--'}</p>
                     </div>
                   </div>
                 </div>
                 <div class="text-right">
-                  <div class="text-4xl mb-1">${lc.icon || '🌡️'}</div>
+                  <div class="text-4xl mb-1">${escHtml(lc.icon || '🌡️')}</div>
                   ${aqBadge}
                 </div>
               </div>
@@ -546,20 +661,20 @@
               <div class="grid grid-cols-3 gap-2 mt-3">
                 <div class="bg-white/10 rounded-xl p-2 text-center">
                   <p class="text-[10px] text-white/60">Humidity</p>
-                  <p class="text-sm font-bold">💧 ${lc.humidity_pct !== undefined ? lc.humidity_pct + '%' : '--'}</p>
+                  <p class="text-sm font-bold">💧 ${lc.humidity_pct !== undefined ? escHtml(lc.humidity_pct) + '%' : '--'}</p>
                 </div>
                 <div class="bg-white/10 rounded-xl p-2 text-center">
                   <p class="text-[10px] text-white/60">Wind</p>
-                  <p class="text-sm font-bold">💨 ${lc.wind_kmh !== undefined ? lc.wind_kmh + ' km/h' : '--'}</p>
+                  <p class="text-sm font-bold">💨 ${lc.wind_kmh !== undefined ? escHtml(lc.wind_kmh) + ' km/h' : '--'}</p>
                 </div>
                 <div class="bg-white/10 rounded-xl p-2 text-center">
                   <p class="text-[10px] text-white/60">UV Index</p>
-                  <p class="text-sm font-bold">☀️ ${lc.uv_index !== undefined ? lc.uv_index : '--'}</p>
+                  <p class="text-sm font-bold">☀️ ${lc.uv_index !== undefined ? escHtml(lc.uv_index) : '--'}</p>
                 </div>
               </div>
 
               ${aq.health_advice ? `<p class="text-[10px] text-white/70 mt-2 italic">💨 ${escHtml(aq.health_advice)}</p>` : ''}
-              ${btw.start ? `<p class="text-[10px] text-emerald-300 mt-1 font-semibold">⏰ Best travel window: ${btw.start} — ${escHtml(btw.reason || '')}</p>` : ''}
+              ${btw.start ? `<p class="text-[10px] text-emerald-300 mt-1 font-semibold">⏰ Best travel window: ${escHtml(btw.start)} — ${escHtml(btw.reason || '')}</p>` : ''}
 
               ${hourlyHtml}
             </div>
@@ -581,23 +696,24 @@
           'LOW': 'text-emerald-800', 'MODERATE': 'text-amber-900',
           'HIGH': 'text-red-900', 'CRITICAL': 'text-red-900', 'UNKNOWN': 'text-gray-700'
         };
-        const risk = road.risk_level || 'LOW';
-        const riskClass = riskColors[risk] || riskColors['LOW'];
-        const riskText = riskTextColors[risk] || riskTextColors['LOW'];
+        const risk = road.risk_level || 'UNKNOWN';
+        const riskClass = riskColors[risk] || riskColors['UNKNOWN'];
+        const riskText = riskTextColors[risk] || riskTextColors['UNKNOWN'];
 
         panel.insertAdjacentHTML('beforeend', `
           <div class="border rounded-2xl p-4 space-y-2.5 itinerary-day ${riskClass}">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <span class="material-symbols-outlined text-lg ${riskText}">traffic</span>
-                <span class="text-xs font-bold ${riskText} uppercase tracking-wider">Road Conditions</span>
+                <span class="text-xs font-bold ${riskText} uppercase tracking-wider">Weather-based road advisory</span>
               </div>
               <span class="text-xs font-extrabold px-3 py-1 rounded-full ${
                 risk === 'LOW' ? 'bg-emerald-100 text-emerald-800' :
                 risk === 'MODERATE' ? 'bg-amber-100 text-amber-900' :
-                'bg-red-100 text-red-800'
-              }">${road.risk_icon || ''} ${risk} RISK</span>
+                risk === 'UNKNOWN' ? 'bg-gray-100 text-gray-700' : 'bg-red-100 text-red-800'
+              }">${escHtml(road.risk_icon || '')} ${escHtml(risk)} RISK</span>
             </div>
+            <p class="text-[10px] ${riskText}">Based on destination weather only. Live traffic, closures, and road-authority alerts are not connected.</p>
 
             ${road.best_departure_time ? `
               <div class="bg-white/70 rounded-xl p-2.5 flex items-center gap-2">
@@ -647,15 +763,19 @@
           <div class="flex justify-between items-center px-1">
             <h4 class="text-xs font-bold text-on-surface flex items-center gap-1.5">
               <span class="material-symbols-outlined text-primary text-base">pin_drop</span>
-              Interactive Destination Map
+              Places & Live Hotel Offers
             </h4>
-            <span class="text-[10px] text-on-surface-variant font-medium">Live Pin Drop</span>
+            <span class="text-[10px] text-on-surface-variant font-medium">Provider coordinates only</span>
           </div>
           <div id="trip-map"></div>
+          <div class="flex flex-wrap gap-3 px-1 text-[10px] text-on-surface-variant">
+            <span><span class="inline-block w-2 h-2 rounded-full bg-blue-600 mr-1"></span>Place listings</span>
+            <span><span class="inline-block w-2 h-2 rounded-full bg-primary mr-1"></span>Hotel offers</span>
+          </div>
         </div>
       `);
 
-      initLeafletMap(data.destination, data.top_places);
+      initLeafletMap(data.destination, data.top_places, data.all_hotels);
 
       // ── 3. Best Route Recommendation Card ─────────────────────────────────
       if (data.route_recommendation) {
@@ -664,7 +784,7 @@
           <div class="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4 space-y-2 itinerary-day">
             <div class="flex items-center gap-2 text-xs font-extrabold text-amber-900">
               <span class="material-symbols-outlined text-amber-700 text-lg">alt_route</span>
-              Best Route Advice: ${route.best_mode || 'Flight / Train'}
+              Route notes${route.best_mode ? `: ${escHtml(route.best_mode)}` : ''}
             </div>
             <p class="text-xs text-amber-800 leading-relaxed">${escHtml(route.reason || '')}</p>
             ${route.local_transport ? `<p class="text-[11px] font-medium text-amber-700 mt-1">🛵 ${escHtml(route.local_transport)}</p>` : ''}
@@ -678,33 +798,39 @@
           <div class="bg-white border border-outline-variant rounded-2xl p-4 space-y-3 itinerary-day">
             <h4 class="text-xs font-bold text-on-surface-variant uppercase tracking-wider flex items-center gap-1.5">
               <span class="material-symbols-outlined text-primary text-base">directions_transit</span>
-              Transport Modes & Instant Booking
+              Provider-backed transport prices
             </h4>
             <div class="space-y-2">
               ${data.transport_comparison.map(item => {
                 let bookUrl = 'https://www.makemytrip.com';
-                let bookText = 'Book Now';
+                let bookText = 'Search options';
                 if (item.mode.includes('Flight')) {
                   bookUrl = `https://www.makemytrip.com/flights/`;
-                  bookText = 'MakeMyTrip ✈️';
+                  bookText = 'Search flights';
                 } else if (item.mode.includes('Train')) {
                   bookUrl = `https://www.irctc.co.in`;
-                  bookText = 'IRCTC 🚆';
+                  bookText = 'Search trains';
                 } else if (item.mode.includes('Bus')) {
                   bookUrl = `https://www.redbus.in`;
-                  bookText = 'RedBus 🚌';
+                  bookText = 'Search buses';
                 } else if (item.mode.includes('Taxi') || item.mode.includes('Cab')) {
                   bookUrl = `https://www.uber.com`;
-                  bookText = 'Uber / Taxi 🚗';
+                  bookText = 'Search rides';
                 }
+                const inventoryText = /Flight|Train|Bus/.test(item.mode)
+                  ? (Number.isInteger(item.bookable_seats)
+                    ? `${item.bookable_seats} seats reported`
+                    : 'Seat count not reported')
+                  : 'Quote only';
                 return `
                   <div class="flex items-center justify-between bg-surface-container-low p-3 rounded-xl border border-outline-variant hover:border-primary transition-all">
                     <div>
                       <div class="flex items-center gap-2">
-                        <span class="font-bold text-xs text-on-surface">${item.mode}</span>
-                        <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full ${item.badge_color}">${item.badge}</span>
+                        <span class="font-bold text-xs text-on-surface">${escHtml(item.mode)}</span>
+                        <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full ${TRANSPORT_BADGE_CLASSES.has(item.badge_color) ? item.badge_color : 'bg-gray-100 text-gray-800'}">${escHtml(item.badge)}</span>
                       </div>
-                      <p class="text-[11px] text-on-surface-variant mt-0.5">${escHtml(item.provider)} • ${item.duration}</p>
+                      <p class="text-[11px] text-on-surface-variant mt-0.5">${escHtml(item.provider)} • ${escHtml(item.duration)}</p>
+                      <p class="text-[10px] text-on-surface-variant mt-0.5">${escHtml(inventoryText)} · Not booked</p>
                     </div>
                     <div class="text-right flex items-center gap-3">
                       <div>
@@ -722,36 +848,108 @@
             </div>
           </div>
         `);
+      } else {
+        panel.insertAdjacentHTML('beforeend', `
+          <div class="bg-white border border-outline-variant rounded-2xl p-4 space-y-3 itinerary-day">
+            <h4 class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Check transport availability</h4>
+            <p class="text-[11px] text-on-surface-variant">No live quotes are connected for this route. Check schedules and prices directly with providers.</p>
+            <div class="flex flex-wrap gap-2">
+              <a href="https://www.makemytrip.com/flights/" target="_blank" rel="noopener" class="text-xs font-semibold text-primary underline">Flights</a>
+              <a href="https://www.irctc.co.in/nget/train-search" target="_blank" rel="noopener" class="text-xs font-semibold text-primary underline">Trains</a>
+              <a href="https://www.redbus.in" target="_blank" rel="noopener" class="text-xs font-semibold text-primary underline">Buses</a>
+            </div>
+          </div>
+        `);
       }
 
-      // ── 4b. Recommended Hotel Card ─────────────────────────────────────────
-      if (data.recommended_hotel) {
-        const hotel = data.recommended_hotel;
-        const hotelBookUrl = `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(data.destination)}`;
+      // ── 4b. Provider-backed Hotel Offers ────────────────────────────────────
+      const hotelOffers = Array.isArray(data.all_hotels) ? data.all_hotels : [];
+      if (hotelOffers.length) {
+        const hotelCards = hotelOffers.map((hotel, index) => {
+          const pricePerNight = Number(hotel.price_per_night_inr);
+          const totalPrice = Number(hotel.total_inr);
+          const hasPrice = Number.isFinite(pricePerNight) && pricePerNight > 0;
+          const hasTotal = Number.isFinite(totalPrice) && totalPrice > 0;
+          const roomsAvailable = hotel.rooms_available;
+          const roomCountText = Number.isInteger(roomsAvailable) && roomsAvailable >= 0
+            ? `${roomsAvailable} rooms reported`
+            : 'Exact room count not provided';
+          const nearby = Array.isArray(hotel.nearby_places) ? hotel.nearby_places : [];
+          const nearbyText = nearby.length
+            ? `Near ${nearby.slice(0, 2).map(place => `${place.name} (${place.distance_km} km)`).join(' · ')}`
+            : (hotel.nearest_place_distance_km !== null && hotel.nearest_place_distance_km !== undefined
+              ? `Closest mapped place: ${hotel.nearest_place_distance_km} km`
+              : 'Nearby distance unavailable; provider coordinates are missing');
+          const searchParams = new URLSearchParams({
+            ss: `${hotel.name || ''}, ${data.destination}`,
+            group_adults: String(data.guests || 1),
+            no_rooms: '1',
+          });
+          if (!data.dates?.assumed && data.dates?.start && data.dates?.end) {
+            searchParams.set('checkin', data.dates.start);
+            searchParams.set('checkout', data.dates.end);
+          }
+          const hotelSearchUrl = `https://www.booking.com/searchresults.html?${searchParams.toString()}`;
+          const latitude = Number(hotel.latitude);
+          const longitude = Number(hotel.longitude);
+          const hasCoordinates = hotel.latitude !== null && hotel.latitude !== undefined
+            && hotel.longitude !== null && hotel.longitude !== undefined
+            && Number.isFinite(latitude) && Math.abs(latitude) <= 90
+            && Number.isFinite(longitude) && Math.abs(longitude) <= 180;
+          const mapUrl = hasCoordinates
+            ? `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=16/${latitude}/${longitude}`
+            : null;
+          const availabilityText = hotel.availability_status === 'offer_found'
+            ? 'Provider returned an offer'
+            : 'Availability not confirmed';
+          return `
+            <article class="bg-white border border-outline-variant rounded-2xl p-4 space-y-3 itinerary-day">
+              <div class="flex justify-between items-start gap-3">
+                <div>
+                  <span class="text-[10px] font-bold text-primary uppercase tracking-wider">${escHtml(hotel.source || data.hotel_search?.source || 'Hotel provider')} offer ${index + 1}</span>
+                  <h4 class="text-sm font-bold text-on-surface flex items-center gap-1.5 mt-0.5">
+                    <span class="material-symbols-outlined text-primary text-base">hotel</span>
+                    ${escHtml(hotel.name || 'Hotel')}
+                  </h4>
+                  <p class="text-[10px] text-on-surface-variant mt-1">${escHtml(hotel.address || '')}</p>
+                </div>
+                ${hotel.rating ? `<span class="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full">★ ${escHtml(hotel.rating)}</span>` : ''}
+              </div>
+              <div class="grid grid-cols-2 gap-2 border-y border-outline-variant py-2">
+                <div>
+                  <p class="text-xs font-extrabold text-on-surface">${hasPrice ? `₹${pricePerNight.toLocaleString('en-IN')}` : 'Price unavailable'}<span class="text-[10px] text-on-surface-variant font-normal">${hasPrice ? '/night' : ''}</span></p>
+                  ${hasTotal ? `<p class="text-[10px] text-on-surface-variant">₹${totalPrice.toLocaleString('en-IN')} for stay</p>` : ''}
+                </div>
+                <div class="text-right">
+                  <p class="text-[10px] font-semibold text-on-surface">${escHtml(roomCountText)}</p>
+                  <p class="text-[10px] text-on-surface-variant">${escHtml(availabilityText)} · Not booked</p>
+                </div>
+              </div>
+              <p class="text-[10px] text-on-surface-variant">${escHtml(nearbyText)}</p>
+              <div class="flex flex-wrap gap-2">
+                <a href="${hotelSearchUrl}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold hover:opacity-90 transition-all">
+                  Compare external options
+                </a>
+                ${mapUrl ? `<a href="${mapUrl}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 rounded-lg border border-outline-variant text-xs font-semibold text-on-surface-variant">Open map</a>` : ''}
+              </div>
+              <p class="text-[10px] text-on-surface-variant">Prices and room inventory may change; external search results may differ. No reservation has been made.</p>
+            </article>
+          `;
+        }).join('');
+        panel.insertAdjacentHTML('beforeend', `
+          <div class="space-y-3 itinerary-day">
+            <h4 class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Live hotel offers</h4>
+            ${hotelCards}
+          </div>
+        `);
+      } else {
+        const hotelStatus = data.provider_status?.hotels?.status || 'unavailable';
+        const hotelNote = data.provider_status?.hotels?.note || 'No live hotel offer was returned for these dates.';
         panel.insertAdjacentHTML('beforeend', `
           <div class="bg-white border border-outline-variant rounded-2xl p-4 space-y-2 itinerary-day">
-            <div class="flex justify-between items-start">
-              <div>
-                <span class="text-[10px] font-bold text-primary uppercase tracking-wider">Recommended Stay</span>
-                <h4 class="text-sm font-bold text-on-surface flex items-center gap-1.5 mt-0.5">
-                  <span class="material-symbols-outlined text-primary text-base">hotel</span>
-                  ${escHtml(hotel.name || 'Boutique Heritage Hotel')}
-                </h4>
-              </div>
-              <span class="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                ★ ${hotel.rating || '4.5'}
-              </span>
-            </div>
-            <div class="flex justify-between items-center pt-1 border-t border-outline-variant">
-              <div>
-                <p class="text-xs font-extrabold text-on-surface">₹${Number(hotel.price_per_night_inr || 3500).toLocaleString('en-IN')}<span class="text-[10px] text-on-surface-variant font-normal">/night</span></p>
-                <p class="text-[10px] text-on-surface-variant">Includes breakfast & WiFi</p>
-              </div>
-              <a href="${hotelBookUrl}" target="_blank" rel="noopener" class="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold hover:opacity-90 transition-all flex items-center gap-1 active:scale-95">
-                <span>Book Hotel</span>
-                <span class="material-symbols-outlined text-xs">open_in_new</span>
-              </a>
-            </div>
+            <h4 class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Hotel availability</h4>
+            <p class="text-[11px] text-on-surface-variant">${escHtml(hotelNote)} Room counts and prices are not estimated.</p>
+            <span class="inline-flex rounded-full bg-surface-container px-2 py-1 text-[10px] font-semibold text-on-surface-variant">${escHtml(hotelStatus.replaceAll('_', ' '))}</span>
           </div>
         `);
       }
@@ -768,7 +966,7 @@
             <div class="space-y-2.5">
               ${advisories.map(adv => `
                 <div class="bg-surface-container-low rounded-xl p-3">
-                  <p class="text-xs font-bold text-on-surface mb-1.5">${adv.icon || ''} ${escHtml(adv.title)}</p>
+                  <p class="text-xs font-bold text-on-surface mb-1.5">${escHtml(adv.icon || '')} ${escHtml(adv.title)}</p>
                   <ul class="space-y-1">
                     ${(adv.items || []).map(item => `
                       <li class="text-[11px] text-on-surface-variant leading-snug">• ${escHtml(item)}</li>
@@ -787,7 +985,7 @@
           <div class="bg-white border border-outline-variant rounded-2xl p-4 space-y-2.5 itinerary-day">
             <h4 class="text-xs font-bold text-on-surface-variant uppercase tracking-wider flex items-center gap-1.5">
               <span class="material-symbols-outlined text-primary text-base">backpack</span>
-              Trip Packing Checklist (${data.destination})
+              Trip Packing Checklist (${escHtml(data.destination)})
             </h4>
             <div class="space-y-1.5">
               ${data.packing_checklist.map((item, idx) => `
@@ -805,36 +1003,9 @@
       if (data.cultural_guide) {
         const cg = data.cultural_guide;
         panel.insertAdjacentHTML('beforeend', `
-          <div class="bg-amber-50/60 border border-amber-200 rounded-2xl p-4 space-y-3 itinerary-day">
-            <h4 class="text-xs font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
-              <span class="material-symbols-outlined text-amber-700 text-base">gavel</span>
-              Local Etiquette, Safety & Scam Prevention
-            </h4>
-            
-            <div class="space-y-2">
-              <div class="bg-white/80 rounded-xl p-2.5 space-y-1">
-                <p class="text-[10px] font-extrabold text-amber-800 uppercase tracking-wider">🚨 Emergency Numbers</p>
-                <div class="flex flex-wrap gap-2 text-[11px] font-semibold text-amber-900">
-                  <span class="bg-red-100 text-red-800 px-2 py-0.5 rounded-md">Police: ${cg.emergency?.police || '112'}</span>
-                  <span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md">Ambulance: ${cg.emergency?.ambulance || '108'}</span>
-                  <span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-md">Helpline: ${cg.emergency?.tourist_helpline || '1363'}</span>
-                </div>
-              </div>
-
-              <div class="bg-white/80 rounded-xl p-2.5 space-y-1">
-                <p class="text-[10px] font-extrabold text-amber-800 uppercase tracking-wider">⚠️ Tourist Scams to Avoid</p>
-                ${(cg.scams || []).map(s => `
-                  <p class="text-[11px] text-amber-900 leading-tight">${escHtml(s)}</p>
-                `).join('')}
-              </div>
-
-              <div class="bg-white/80 rounded-xl p-2.5 space-y-1">
-                <p class="text-[10px] font-extrabold text-amber-800 uppercase tracking-wider">🙏 Local Customs & Etiquette</p>
-                ${(cg.etiquette || []).map(e => `
-                  <p class="text-[11px] text-amber-900 leading-tight">${escHtml(e)}</p>
-                `).join('')}
-              </div>
-            </div>
+          <div class="bg-amber-50/60 border border-amber-200 rounded-2xl p-4 space-y-2 itinerary-day">
+            <h4 class="text-xs font-bold text-amber-900 uppercase tracking-wider">Local safety information</h4>
+            <p class="text-[11px] text-amber-900">${escHtml(cg.note || 'Destination-specific official safety information is not connected.')}</p>
           </div>
         `);
       }
@@ -843,7 +1014,7 @@
       if (data.day_plan?.length) {
         panel.insertAdjacentHTML('beforeend', `
           <div class="flex justify-between items-center pt-2 itinerary-day">
-            <h4 class="text-xs font-bold text-on-surface-variant uppercase tracking-wider px-1">Day-by-Day Schedule (3 Meals Included)</h4>
+            <h4 class="text-xs font-bold text-on-surface-variant uppercase tracking-wider px-1">Day-by-Day Outline</h4>
           </div>
         `);
         data.day_plan.forEach((day, i) => {
@@ -851,10 +1022,10 @@
             <div class="itinerary-day space-y-2" style="animation-delay: ${i * 0.06}s">
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
-                  <div class="w-7 h-7 rounded-full bg-primary text-white font-bold text-xs flex items-center justify-center flex-shrink-0">${day.day}</div>
-                  <h5 class="font-bold text-sm text-on-surface">${day.date} ${day.weather?.icon || ''}</h5>
+                  <div class="w-7 h-7 rounded-full bg-primary text-white font-bold text-xs flex items-center justify-center flex-shrink-0">${escHtml(day.day)}</div>
+                  <h5 class="font-bold text-sm text-on-surface">${escHtml(day.date)} ${escHtml(day.weather?.icon || '')}</h5>
                 </div>
-                ${day.is_rainy ? `<span class="text-[10px] bg-blue-100 text-blue-800 font-semibold px-2 py-0.5 rounded-full">🌧️ Weather Swap</span>` : ''}
+                ${day.is_rainy ? `<span class="text-[10px] bg-blue-100 text-blue-800 font-semibold px-2 py-0.5 rounded-full">🌧️ Rain forecast</span>` : ''}
               </div>
               ${day.travel_tip ? `<p class="text-[11px] text-on-surface-variant italic ml-9 px-2 py-1 bg-surface-container rounded-lg">${escHtml(day.travel_tip)}</p>` : ''}
               <div class="ml-3 pl-4 border-l-2 border-dashed border-outline-variant space-y-2">
@@ -865,7 +1036,7 @@
                       <div class="flex justify-between items-start">
                         <p class="text-xs font-bold text-on-surface">${escHtml(act.title || '')}</p>
                         ${act.type === 'attraction' ? `
-                          <button onclick="speakText('${escHtml(act.title)}: ${escHtml(act.description)}')" title="Listen to Audio Guide" class="text-primary hover:text-amber-700 p-0.5 flex items-center gap-0.5">
+                          <button data-audio-text="${escHtml(`${act.title || ''}: ${act.description || ''}`)}" title="Listen to Audio Guide" class="audio-guide-button text-primary hover:text-amber-700 p-0.5 flex items-center gap-0.5">
                             <span class="material-symbols-outlined text-sm">volume_up</span>
                           </button>
                         ` : ''}
@@ -879,13 +1050,38 @@
             </div>
           `);
         });
+        panel.querySelectorAll('.audio-guide-button').forEach(button => {
+          button.addEventListener('click', () => speakText(button.dataset.audioText || ''));
+        });
       }
     }
 
-    function initLeafletMap(destination, places) {
+    function initLeafletMap(destination, places, hotels) {
       setTimeout(() => {
-        const destKey = (destination || 'goa').toLowerCase().strip ? destination.toLowerCase().strip() : 'goa';
-        const coords = MAP_COORDS[destKey] || [15.2993, 74.1240];
+        const destKey = String(destination || '').trim().toLowerCase();
+        const destinationCoords = Object.hasOwn(MAP_COORDS, destKey) ? MAP_COORDS[destKey] : null;
+        const placeLocations = (Array.isArray(places) ? places : []).flatMap(place => {
+          if (place.latitude === null || place.latitude === undefined
+            || place.longitude === null || place.longitude === undefined
+            || String(place.latitude).trim() === '' || String(place.longitude).trim() === '') return [];
+          const coords = [Number(place.latitude), Number(place.longitude)];
+          if (!coords.every(Number.isFinite) || Math.abs(coords[0]) > 90 || Math.abs(coords[1]) > 180) return [];
+          return [{ name: place.name, category: place.category, coords }];
+        });
+        const hotelLocations = (Array.isArray(hotels) ? hotels : []).flatMap(hotel => {
+          if (hotel.latitude === null || hotel.latitude === undefined
+            || hotel.longitude === null || hotel.longitude === undefined) return [];
+          const coords = [Number(hotel.latitude), Number(hotel.longitude)];
+          if (!coords.every(Number.isFinite) || Math.abs(coords[0]) > 90 || Math.abs(coords[1]) > 180) return [];
+          return [{ ...hotel, coords }];
+        });
+        const coords = destinationCoords || placeLocations[0]?.coords || hotelLocations[0]?.coords;
+        const mapElement = document.getElementById('trip-map');
+        if (!mapElement) return;
+        if (!coords) {
+          mapElement.outerHTML = `<p class="rounded-xl bg-surface-container-low px-3 py-4 text-xs text-on-surface-variant">Map coordinates are not available for ${escHtml(destination)}.</p>`;
+          return;
+        }
 
         if (leafMap) { leafMap.remove(); leafMap = null; }
 
@@ -897,22 +1093,36 @@
 
         L.control.zoom({ position: 'topright' }).addTo(leafMap);
 
-        L.marker(coords).addTo(leafMap)
-          .bindPopup(`<b>${destination}</b><br/>Trip Destination`)
-          .openPopup();
-
-        const points = [coords];
-
-        if (places && places.length) {
-          places.forEach((p, idx) => {
-            const offsetLat = coords[0] + (Math.sin(idx + 1) * 0.08);
-            const offsetLng = coords[1] + (Math.cos(idx + 1) * 0.08);
-            points.push([offsetLat, offsetLng]);
-            L.marker([offsetLat, offsetLng]).addTo(leafMap)
-              .bindPopup(`<b>${p.name}</b><br/>${p.category || 'Attraction'}`);
-          });
-          // Draw connected polyline path between places
-          L.polyline(points, { color: '#a43c12', weight: 3, opacity: 0.7, dashArray: '6, 6' }).addTo(leafMap);
+        const markers = [];
+        if (destinationCoords) {
+          markers.push(L.marker(destinationCoords).addTo(leafMap)
+            .bindPopup(`<b>${escHtml(destination)}</b><br/>Destination area`));
+        }
+        placeLocations.forEach(place => {
+          markers.push(L.circleMarker(place.coords, {
+            radius: 6, color: '#2563eb', fillColor: '#2563eb', fillOpacity: 0.9,
+          }).addTo(leafMap)
+            .bindPopup(`<b>${escHtml(place.name)}</b><br/>${escHtml(place.category || 'Place listing')}`));
+        });
+        hotelLocations.forEach(hotel => {
+          const price = Number(hotel.price_per_night_inr);
+          const priceText = Number.isFinite(price) && price > 0
+            ? `₹${price.toLocaleString('en-IN')} per night`
+            : 'Price unavailable';
+          const roomText = Number.isInteger(hotel.rooms_available) && hotel.rooms_available >= 0
+            ? `${hotel.rooms_available} rooms reported`
+            : 'Exact room count not provided';
+          const nearbyText = Array.isArray(hotel.nearby_places) && hotel.nearby_places.length
+            ? `<br/>Near ${escHtml(hotel.nearby_places[0].name)} (${escHtml(hotel.nearby_places[0].distance_km)} km)`
+            : '';
+          markers.push(L.circleMarker(hotel.coords, {
+            radius: 8, color: '#a43c12', fillColor: '#ff7f50', fillOpacity: 0.95,
+          }).addTo(leafMap)
+            .bindPopup(`<b>${escHtml(hotel.name || 'Hotel offer')}</b><br/>${escHtml(priceText)}<br/>${escHtml(roomText)}${nearbyText}`));
+        });
+        if (markers.length) markers[0].openPopup();
+        if (markers.length > 1) {
+          leafMap.fitBounds(L.featureGroup(markers).getBounds().pad(0.15));
         }
       }, 200);
     }
@@ -981,21 +1191,54 @@
       recognition.start();
     }
 
-    function saveCurrentTrip() {
-      if (!currentItinerary) return alert('Plan a trip first!');
-      let trips = JSON.parse(localStorage.getItem('roam_saved_trips') || '[]');
-      trips.unshift({
-        id: 'trip_' + Date.now(),
-        title: `${currentItinerary.destination} ${currentItinerary.days}-Day Escape`,
-        destination: currentItinerary.destination,
-        days: currentItinerary.days,
-        dates: currentItinerary.dates,
-        cost: currentItinerary.estimated_cost_inr,
-        data: currentItinerary,
-        created: new Date().toLocaleDateString()
+    async function saveItineraryRecord(itinerary, apiFetch) {
+      const rawCost = itinerary.estimated_cost_inr;
+      const estimatedCost = rawCost !== null && rawCost !== undefined && rawCost !== ''
+        && Number.isFinite(Number(rawCost))
+        ? Number(rawCost)
+        : null;
+      const dates = itinerary.dates && typeof itinerary.dates === 'object' && !Array.isArray(itinerary.dates)
+        ? itinerary.dates
+        : {};
+      const response = await apiFetch('/trips', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: `${itinerary.destination} ${itinerary.days}-Day Escape`,
+          destination: itinerary.destination,
+          days: Number(itinerary.days),
+          dates,
+          estimated_cost_inr: estimatedCost,
+          itinerary,
+        }),
       });
-      localStorage.setItem('roam_saved_trips', JSON.stringify(trips));
-      showToast('Trip saved to My Trips! 🚀');
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not save this trip.');
+      return result;
+    }
+
+    async function saveCurrentTrip() {
+      if (!currentItinerary) return alert('Plan a trip first!');
+      if (currentSavedTripId) return showToast('This trip is already saved.');
+
+      const button = document.getElementById('save-trip-button');
+      button.disabled = true;
+      try {
+        const { supabase, apiFetch } = await window.RoamAuth.initialize();
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        if (!data.session) {
+          sessionStorage.setItem('roam_pending_trip', JSON.stringify(currentItinerary));
+          window.location.href = 'account.html?next=plan.html';
+          return;
+        }
+        const savedTrip = await saveItineraryRecord(currentItinerary, apiFetch);
+        currentSavedTripId = savedTrip.id;
+        showToast('Trip saved to your account.');
+      } catch (error) {
+        showToast(error.message || 'Could not save this trip.');
+      } finally {
+        button.disabled = false;
+      }
     }
 
     function activityIcon(type, title) {
@@ -1004,7 +1247,7 @@
         travel: 'flight', hotel: 'hotel', attraction: 'location_on',
         food: 'restaurant', nature: 'park', culture: 'museum',
       };
-      return icons[type] || 'place';
+      return Object.hasOwn(icons, type) ? icons[type] : 'place';
     }
 
     function openEmailModal() { document.getElementById('email-modal').classList.remove('hidden'); }
@@ -1044,6 +1287,11 @@
       const email = document.getElementById('alert-email').value.trim();
       const price = parseFloat(document.getElementById('alert-price').value);
       if (!email || !price) return alert('Please fill in both fields');
+      const routeCodes = String(currentItinerary?.flight_search?.route || '').split('→').map(code => code.trim());
+      const travelDate = currentItinerary?.dates?.start;
+      if (routeCodes.length !== 2 || routeCodes.some(code => !/^[A-Z]{3}$/.test(code)) || !travelDate || currentItinerary?.dates?.assumed) {
+        return alert('A price alert needs a supported departure and destination airport plus a travel date you specified.');
+      }
 
       const btn = document.getElementById('alert-submit-btn');
       btn.textContent = 'Setting...';
@@ -1054,9 +1302,9 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            email, origin: 'DEL', destination: currentItinerary?.destination || 'GOI',
+            email, origin: routeCodes[0], destination: routeCodes[1],
             target_price_inr: price,
-            travel_date: currentItinerary?.dates?.start || '2026-08-01',
+            travel_date: travelDate,
           }),
         });
         const result = await resp.json();
@@ -1080,7 +1328,13 @@
       return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
     function escHtml(str) {
-      return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      return String(str ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[char]);
     }
   </script>
 </body>
