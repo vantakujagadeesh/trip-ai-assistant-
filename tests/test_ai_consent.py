@@ -57,6 +57,24 @@ class GeminiConsentTests(unittest.IsolatedAsyncioTestCase):
         gemini.assert_not_called()
         self.assertIn("couldn't answer", result["llm_response"])
 
+    async def test_selected_interests_apply_even_when_gemini_parses_intent(self):
+        state = {
+            "user_message": "Plan a trip to Goa",
+            "tool_status": [],
+            "ai_data_consent": True,
+            "traveler_preferences": {"interests": ["culture", "nature"]},
+        }
+        with patch(
+            "graph.agent._call_gemini",
+            return_value='{"destination":"Goa","days":3,"preferences":["attractions"]}',
+        ):
+            parsed = await intent_parser_node(state)
+
+        self.assertEqual(
+            parsed["parsed_intent"]["preferences"],
+            ["cultural", "natural", "restaurants"],
+        )
+
     async def test_consented_synthesis_sends_redacted_user_message(self):
         state = {
             "user_message": "Plan Goa on 2026-12-10. jane@example.com +91 9876543210",

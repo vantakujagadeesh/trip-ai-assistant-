@@ -61,6 +61,7 @@ class TravelAgentState(TypedDict):
     tool_status: List[str]
     error: Optional[str]
     ai_data_consent: bool
+    traveler_preferences: dict
 
 
 def _fmt(val) -> str:
@@ -329,6 +330,7 @@ async def intent_parser_node(state: TravelAgentState) -> dict:
     prompt = f"""Parse this travel request into JSON. Respond with ONLY valid JSON, nothing else.
 
 User message: "{_redact_direct_contact_details(state['user_message'])}"
+Traveler preferences: {json.dumps(state.get("traveler_preferences", {}), ensure_ascii=False)}
 
 Return this exact JSON structure:
 {{
@@ -366,6 +368,22 @@ Return this exact JSON structure:
 
     # Always run smart regex too — use it if Gemini failed or gave bad destination
     regex_intent = _smart_parse_intent(state["user_message"])
+    traveler_preferences = state.get("traveler_preferences", {})
+    selected_preferences = []
+    if traveler_preferences.get("interests"):
+        interest_preferences = {
+            "culture": "cultural",
+            "history": "historic",
+            "nature": "natural",
+            "beaches": "beaches",
+            "adventure": "natural",
+            "food": "restaurants",
+        }
+        selected_preferences = [
+            interest_preferences[interest]
+            for interest in traveler_preferences["interests"]
+            if interest in interest_preferences
+        ]
 
     # Choose: prefer Gemini if it gave a valid, specific destination
     if gemini_intent and gemini_intent.get('destination') and str(gemini_intent['destination']).lower() not in ['null', '']:
@@ -380,6 +398,9 @@ Return this exact JSON structure:
             intent = gemini_intent
             if not intent.get("start_date"):
                 intent["start_date"] = regex_intent.get("start_date")
+
+    if selected_preferences:
+        intent["preferences"] = list(dict.fromkeys([*selected_preferences, "restaurants"]))
 
     dest = intent.get('destination') or "unspecified destination"
     days = intent.get('days', 5)
@@ -429,6 +450,7 @@ async def tool_execution_node(state: TravelAgentState) -> dict:
             start_date=intent.get("start_date"),
             preferences=prefs,
             guests=guests,
+            traveler_preferences=state.get("traveler_preferences", {}),
         )
 
         result_status = list(new_status)
@@ -719,7 +741,11 @@ def get_agent():
     return _agent
 
 
-async def run_agent(user_message: str, ai_data_consent: bool = False) -> dict:
+async def run_agent(
+    user_message: str,
+    ai_data_consent: bool = False,
+    traveler_preferences: Optional[dict] = None,
+) -> dict:
     """Run the full multi-modal travel agent pipeline."""
     agent = get_agent()
     if ai_data_consent:
@@ -740,6 +766,7 @@ async def run_agent(user_message: str, ai_data_consent: bool = False) -> dict:
         "tool_status": initial_status,
         "error": None,
         "ai_data_consent": ai_data_consent,
+        "traveler_preferences": traveler_preferences or {},
     }
     final_state = await agent.ainvoke(initial_state)
     return {

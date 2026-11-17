@@ -46,6 +46,27 @@ class PersistenceApiTests(unittest.TestCase):
         self.assertEqual(response.json()["id"], TRIP_ID)
         self.assertEqual(rest.await_args.kwargs["payload"]["user_id"], USER_ID)
 
+    def test_trip_update_is_scoped_to_authenticated_owner(self):
+        updated = {"id": TRIP_ID, "days": 2, "itinerary": {"day_plan": []}}
+        with patch(
+            "backend.main.supabase_rest",
+            new_callable=AsyncMock,
+            return_value=[updated],
+        ) as rest:
+            response = self.client.patch(
+                f"/trips/{TRIP_ID}",
+                json={
+                    "days": 2,
+                    "dates": {"start": "2026-12-01", "end": "2026-12-02"},
+                    "estimated_cost_inr": None,
+                    "itinerary": {"day_plan": []},
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(rest.await_args.kwargs["params"]["user_id"], f"eq.{USER_ID}")
+        self.assertEqual(rest.await_args.kwargs["payload"]["days"], 2)
+
     def test_booking_request_uses_owned_trip_and_verified_account_email(self):
         trip = {"id": TRIP_ID, "title": "Jaipur trip", "destination": "Jaipur"}
         booking = {"id": "booking-1", "status": "requested"}
