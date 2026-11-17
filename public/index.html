@@ -67,20 +67,45 @@
       </h1>
 
       <p class="text-lg md:text-xl text-on-surface-variant max-w-2xl mx-auto font-normal">
-        Compare <strong>Flights, Vande Bharat Trains, Volvo Buses, and Outstation Cabs</strong> with live weather, maps, and bespoke itineraries generated in seconds.
+        Build a trip outline with live weather and place listings when available. Flight, hotel, train, bus, and local transport availability depends on connected providers.
       </p>
 
-      <!-- AI Prompt Box -->
-      <div class="bg-surface-container-lowest border border-outline-variant p-3 rounded-2xl shadow-lg max-w-3xl mx-auto flex flex-col sm:flex-row gap-3">
-        <div class="flex-1 flex items-center px-4 gap-3 bg-surface-container-low rounded-xl">
-          <span class="material-symbols-outlined text-primary">chat_spark</span>
-          <input type="text" id="hero-prompt-input" placeholder="Try: 'Plan a 5-day trip to Goa under ₹30,000'..." class="w-full bg-transparent border-none py-3 text-sm focus:ring-0 focus:outline-none text-on-surface placeholder:text-on-surface-variant/70"/>
+      <form id="trip-start-form" onsubmit="startStructuredTrip(event)" class="bg-white border border-outline-variant p-4 sm:p-5 rounded-2xl shadow-lg max-w-4xl mx-auto text-left space-y-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <label class="text-xs font-semibold text-on-surface-variant">Destination
+            <input id="trip-destination" required maxlength="120" autocomplete="off"
+              placeholder="e.g. Goa" class="mt-1 w-full bg-surface-container-low border border-outline-variant rounded-xl px-3 py-3 text-sm text-on-surface focus:ring-2 focus:ring-primary focus:outline-none"/>
+          </label>
+          <label class="text-xs font-semibold text-on-surface-variant">Leaving from
+            <input id="trip-origin" maxlength="120" autocomplete="address-level2"
+              placeholder="Optional" class="mt-1 w-full bg-surface-container-low border border-outline-variant rounded-xl px-3 py-3 text-sm text-on-surface focus:ring-2 focus:ring-primary focus:outline-none"/>
+          </label>
+          <label class="text-xs font-semibold text-on-surface-variant">Start date
+            <input id="trip-start-date" type="date" class="mt-1 w-full bg-surface-container-low border border-outline-variant rounded-xl px-3 py-3 text-sm text-on-surface focus:ring-2 focus:ring-primary focus:outline-none"/>
+          </label>
+          <label class="text-xs font-semibold text-on-surface-variant">Duration (days)
+            <input id="trip-days" type="number" min="1" max="30" value="5" required
+              class="mt-1 w-full bg-surface-container-low border border-outline-variant rounded-xl px-3 py-3 text-sm text-on-surface focus:ring-2 focus:ring-primary focus:outline-none"/>
+          </label>
+          <label class="text-xs font-semibold text-on-surface-variant">Travelers
+            <input id="trip-guests" type="number" min="1" max="20" value="2" required
+              class="mt-1 w-full bg-surface-container-low border border-outline-variant rounded-xl px-3 py-3 text-sm text-on-surface focus:ring-2 focus:ring-primary focus:outline-none"/>
+          </label>
+          <label class="text-xs font-semibold text-on-surface-variant">Total budget (₹)
+            <input id="trip-budget" type="number" min="1" step="500" placeholder="Optional"
+              class="mt-1 w-full bg-surface-container-low border border-outline-variant rounded-xl px-3 py-3 text-sm text-on-surface focus:ring-2 focus:ring-primary focus:outline-none"/>
+          </label>
         </div>
-        <button onclick="startTripWithPrompt()" class="bg-primary text-white font-semibold px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-opacity-90 transition-all shadow-md active:scale-95">
-          <span>Generate Trip</span>
-          <span class="material-symbols-outlined text-sm">arrow_forward</span>
-        </button>
-      </div>
+        <div class="flex flex-col sm:flex-row gap-3">
+          <input id="trip-interests" maxlength="300" placeholder="Interests or needs (optional), e.g. beaches, food, wheelchair access"
+            class="flex-1 bg-surface-container-low border border-outline-variant rounded-xl px-3 py-3 text-sm text-on-surface focus:ring-2 focus:ring-primary focus:outline-none"/>
+          <button type="submit" class="bg-primary text-white font-semibold px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-opacity-90 transition-all shadow-md active:scale-95">
+            <span>Build my trip outline</span>
+            <span class="material-symbols-outlined text-sm">arrow_forward</span>
+          </button>
+        </div>
+        <p class="text-[11px] text-on-surface-variant">Add a departure city and date for relevant route and weather checks. Availability depends on connected providers.</p>
+      </form>
 
       <!-- Preset Quick Ideas -->
       <div class="flex flex-wrap justify-center items-center gap-3 pt-4 text-xs font-medium">
@@ -88,7 +113,7 @@
         <button onclick="setAndStart('Plan a 5-day trip to Goa under ₹30,000')" class="px-3.5 py-1.5 rounded-full border border-outline-variant bg-white hover:border-primary hover:text-primary transition-all">
           🏖️ 5 days Goa under ₹30k
         </button>
-        <button onclick="setAndStart('Plan a 4-day Jaipur trip from Delhi by train or cab')" class="px-3.5 py-1.5 rounded-full border border-outline-variant bg-white hover:border-primary hover:text-primary transition-all">
+        <button onclick="setAndStart('Plan a 4-day trip to Jaipur from Delhi by train or cab')" class="px-3.5 py-1.5 rounded-full border border-outline-variant bg-white hover:border-primary hover:text-primary transition-all">
           🏰 Jaipur by train / cab
         </button>
         <button onclick="setAndStart('7 days in Kerala backwaters under ₹40,000')" class="px-3.5 py-1.5 rounded-full border border-outline-variant bg-white hover:border-primary hover:text-primary transition-all">
@@ -102,8 +127,8 @@
     <div class="max-w-6xl w-full mt-20">
       <div class="flex justify-between items-end mb-8">
         <div>
-          <h2 class="text-2xl font-bold text-on-surface">Trending Destinations</h2>
-          <p class="text-sm text-on-surface-variant">Real-time multi-modal itineraries powered by AI</p>
+          <h2 class="text-2xl font-bold text-on-surface">Trip ideas</h2>
+          <p class="text-sm text-on-surface-variant">Curated inspiration to get your plan started</p>
         </div>
         <a href="discover.html" class="text-sm font-semibold text-primary hover:underline flex items-center gap-1">
           <span>Explore All</span>
@@ -123,7 +148,7 @@
             </div>
             <p class="text-xs text-on-surface-variant mb-4">Baga Beach • Fort Aguada • Dudhsagar Falls</p>
             <div class="flex justify-between items-center pt-3 border-t border-outline-variant text-xs">
-              <span class="text-primary font-bold">Flights, Vande Bharat & Buses</span>
+              <span class="text-primary font-bold">Curated trip idea</span>
               <span class="text-primary font-semibold flex items-center gap-1">Plan Now <span class="material-symbols-outlined text-xs">arrow_forward</span></span>
             </div>
           </div>
@@ -139,7 +164,7 @@
             </div>
             <p class="text-xs text-on-surface-variant mb-4">Amber Fort • City Palace • Hawa Mahal</p>
             <div class="flex justify-between items-center pt-3 border-t border-outline-variant text-xs">
-              <span class="text-primary font-bold">Vande Bharat & Express</span>
+              <span class="text-primary font-bold">Curated trip idea</span>
               <span class="text-primary font-semibold flex items-center gap-1">Plan Now <span class="material-symbols-outlined text-xs">arrow_forward</span></span>
             </div>
           </div>
@@ -155,7 +180,7 @@
             </div>
             <p class="text-xs text-on-surface-variant mb-4">Alleppey Houseboat • Munnar Tea • Kovalam</p>
             <div class="flex justify-between items-center pt-3 border-t border-outline-variant text-xs">
-              <span class="text-primary font-bold">Houseboats & Coastal Transit</span>
+              <span class="text-primary font-bold">Curated trip idea</span>
               <span class="text-primary font-semibold flex items-center gap-1">Plan Now <span class="material-symbols-outlined text-xs">arrow_forward</span></span>
             </div>
           </div>
@@ -181,18 +206,37 @@
   </footer>
 
   <script>
-    function setPrompt(text) {
-      document.getElementById('hero-prompt-input').value = text;
-    }
     function setAndStart(text) {
       localStorage.setItem('roam_active_prompt', text);
       location.href = 'plan.html';
     }
-    function startTripWithPrompt() {
-      const val = document.getElementById('hero-prompt-input').value;
-      if (val) {
-        localStorage.setItem('roam_active_prompt', val);
+    const tripDateInput = document.getElementById('trip-start-date');
+    const localToday = new Date();
+    localToday.setMinutes(localToday.getMinutes() - localToday.getTimezoneOffset());
+    tripDateInput.min = localToday.toISOString().slice(0, 10);
+    const destinationInput = document.getElementById('trip-destination');
+    destinationInput.addEventListener('input', () => destinationInput.setCustomValidity(''));
+    function startStructuredTrip(event) {
+      event.preventDefault();
+      const destination = destinationInput.value.trim();
+      if (!destination) {
+        destinationInput.setCustomValidity('Enter a destination.');
+        destinationInput.reportValidity();
+        return;
       }
+      const origin = document.getElementById('trip-origin').value.trim();
+      const startDate = document.getElementById('trip-start-date').value;
+      const days = document.getElementById('trip-days').value;
+      const guests = document.getElementById('trip-guests').value;
+      const budget = document.getElementById('trip-budget').value;
+      const interests = document.getElementById('trip-interests').value.trim();
+      const parts = [`Plan a ${days}-day trip to ${destination}`];
+      if (origin) parts.push(`from ${origin},`);
+      if (startDate) parts.push(`starting ${startDate}`);
+      parts.push(`for ${guests} people`);
+      if (budget) parts.push(`under ₹${budget}`);
+      if (interests) parts.push(`Interests or requirements: ${interests}`);
+      localStorage.setItem('roam_active_prompt', parts.join(' '));
       location.href = 'plan.html';
     }
   </script>

@@ -2,8 +2,14 @@
 MCP Tool: Weather Forecast
 Uses Open-Meteo API — completely FREE, no API key required.
 """
+from __future__ import annotations
+
 import httpx
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from mcp_tools.location import resolve_location
 
 
 # City coordinates lookup (expanded for common travel destinations)
@@ -54,68 +60,133 @@ async def get_weather(location: str, start_date: str, end_date: Optional[str] = 
         dict with daily weather forecast including temperature, rain probability, conditions
     """
     loc_key = location.lower().strip()
-    coords = CITY_COORDS.get(loc_key)
+    resolved = await resolve_location(location)
+    if not resolved:
+        coords = CITY_COORDS.get(loc_key)
+        if not coords:
+            return {
+                "status": "location_not_found",
+                "source": "Open-Meteo",
+                "location": location,
+                "forecast": [],
+                "summary": "",
+            }
+        resolved = {"latitude": coords[0], "longitude": coords[1], "timezone": None}
 
-    # Try fuzzy match
-    if not coords:
-        for key, val in CITY_COORDS.items():
-            if loc_key in key or key in loc_key:
-                coords = val
-                break
+    try:
+        requested_start = date.fromisoformat(start_date)
+        requested_end = date.fromisoformat(end_date) if end_date else requested_start + timedelta(days=6)
+    except ValueError:
+        return {
+            "status": "invalid_date",
+            "source": "Open-Meteo",
+            "location": location,
+            "forecast": [],
+            "summary": "",
+        }
 
-    if not coords:
-        return {"error": f"Location '{location}' not found", "weather": []}
+    if requested_end < requested_start:
+        return {
+            "status": "invalid_date_range",
+            "source": "Open-Meteo",
+            "location": location,
+            "forecast": [],
+            "summary": "",
+        }
 
-    lat, lon = coords
-    end = end_date or _add_days(start_date, 6)
+    try:
+        local_today = datetime.now(ZoneInfo(resolved["timezone"])).date()
+    except (ZoneInfoNotFoundError, TypeError, KeyError):
+        local_today = datetime.now(timezone.utc).date()
+    max_forecast_date = local_today + timedelta(days=15)
+    if requested_start < local_today:
+        return {
+            "status": "past_date",
+            "source": "Open-Meteo",
+            "location": location,
+            "forecast": [],
+            "summary": "",
+            "note": "A live forecast is not available for past travel dates.",
+        }
+    if requested_start > max_forecast_date:
+        return {
+            "status": "out_of_range",
+            "source": "Open-Meteo",
+            "location": location,
+            "forecast": [],
+            "summary": "",
+            "forecast_available_through": max_forecast_date.isoformat(),
+            "note": "A reliable daily forecast is available only up to 16 days ahead.",
+        }
+
+    forecast_end = min(requested_end, max_forecast_date)
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 "https://api.open-meteo.com/v1/forecast",
                 params={
-                    "latitude": lat,
-                    "longitude": lon,
-                    "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode",
-                    "start_date": start_date,
-                    "end_date": end,
+                    "latitude": resolved["latitude"],
+                    "longitude": resolved["longitude"],
+                    "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code",
+                    "start_date": requested_start.isoformat(),
+                    "end_date": forecast_end.isoformat(),
                     "timezone": "auto",
                 },
             )
-            if resp.status_code != 200:
-                return {"error": "Weather API unavailable", "weather": []}
+            resp.raise_for_status()
 
             data = resp.json()
             daily = data.get("daily", {})
             dates = daily.get("time", [])
             forecast = []
-            for i, date in enumerate(dates):
-                wcode = daily.get("weathercode", [0])[i]
+            for i, forecast_date in enumerate(dates):
+                wcode = _at(daily.get("weather_code") or daily.get("weathercode"), i)
+                rain_probability = _at(daily.get("precipitation_probability_max"), i)
                 forecast.append({
-                    "date": date,
-                    "max_temp_c": daily.get("temperature_2m_max", [25])[i],
-                    "min_temp_c": daily.get("temperature_2m_min", [18])[i],
-                    "rain_probability": daily.get("precipitation_probability_max", [20])[i],
-                    "condition": WMO_CODES.get(wcode, "Variable"),
-                    "icon": _weather_icon(wcode),
-                    "travel_tip": _weather_tip(wcode, daily.get("precipitation_probability_max", [0])[i]),
+                    "date": forecast_date,
+                    "max_temp_c": _at(daily.get("temperature_2m_max"), i),
+                    "min_temp_c": _at(daily.get("temperature_2m_min"), i),
+                    "rain_probability": rain_probability,
+                    "condition": WMO_CODES.get(wcode, "Unavailable"),
+                    "icon": _weather_icon(wcode) if wcode is not None else "",
+                    "travel_tip": _weather_tip(wcode, rain_probability)
+                    if wcode is not None and rain_probability is not None else "",
                 })
+            status = "live" if forecast and forecast_end == requested_end else "partial"
             return {
+                "status": status if forecast else "unavailable",
+                "source": "Open-Meteo",
                 "location": location,
                 "forecast": forecast,
                 "summary": _weather_summary(forecast),
+                "requested_start": requested_start.isoformat(),
+                "requested_end": requested_end.isoformat(),
+                "forecast_available_through": forecast_end.isoformat() if forecast else None,
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "note": (
+                    "The forecast ends before the full trip dates."
+                    if forecast and forecast_end < requested_end else None
+                ),
             }
-    except Exception as e:
-        return {"error": str(e), "weather": []}
+    except (httpx.HTTPError, ValueError):
+        return {
+            "status": "provider_error",
+            "source": "Open-Meteo",
+            "location": location,
+            "forecast": [],
+            "summary": "",
+            "note": "Weather data is temporarily unavailable.",
+        }
 
 
-def _add_days(date_str: str, days: int) -> str:
-    from datetime import datetime, timedelta
-    d = datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=days)
-    return d.strftime("%Y-%m-%d")
+def _at(values, index: int, default=None):
+    return values[index] if isinstance(values, list) and index < len(values) else default
 
 
-def _weather_icon(wcode: int) -> str:
+def _weather_icon(wcode: int | None) -> str:
+    if wcode is None:
+        return ""
     if wcode == 0: return "☀️"
     if wcode in [1, 2]: return "🌤️"
     if wcode == 3: return "☁️"
@@ -138,8 +209,17 @@ def _weather_tip(wcode: int, rain_prob: float) -> str:
 def _weather_summary(forecast: list) -> str:
     if not forecast:
         return "Weather data unavailable"
-    avg_temp = sum(d["max_temp_c"] for d in forecast) / len(forecast)
-    rainy_days = sum(1 for d in forecast if d["rain_probability"] > 50)
+    temperatures = [
+        day["max_temp_c"] for day in forecast
+        if isinstance(day.get("max_temp_c"), (int, float))
+    ]
+    if not temperatures:
+        return "Weather data unavailable"
+    avg_temp = sum(temperatures) / len(temperatures)
+    rainy_days = sum(
+        1 for day in forecast
+        if isinstance(day.get("rain_probability"), (int, float)) and day["rain_probability"] > 50
+    )
     season = "warm" if avg_temp > 28 else "pleasant" if avg_temp > 20 else "cool"
     rain_txt = f", {rainy_days} rainy day{'s' if rainy_days != 1 else ''}" if rainy_days > 0 else ", mostly dry"
     return f"{season.capitalize()} weather (avg {avg_temp:.0f}°C){rain_txt}"
